@@ -2,6 +2,37 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  async headers() {
+    return [
+      {
+        source: "/_next/static/immutable/media/:path*",
+        headers: [
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow",
+          },
+        ],
+      },
+      {
+        source: "/_next/static/media/:path*",
+        headers: [
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow",
+          },
+        ],
+      },
+      {
+        source: "/:path*\\.(woff|woff2|ttf|otf|eot)",
+        headers: [
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow",
+          },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [
       {
