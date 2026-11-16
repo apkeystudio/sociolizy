@@ -5,7 +5,6 @@ import { verifySessionToken } from "@/lib/auth";
 import { syncActiveOrdersFromProviders } from "@/lib/order-sync";
 import { recordTrace } from "@/lib/trace-logger";
 
-export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
