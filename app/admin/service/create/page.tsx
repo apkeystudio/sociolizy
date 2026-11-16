@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, Loader2, AlertCircle, Sparkles } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function CreateServicePage() {
   const router = useRouter();
@@ -135,6 +136,7 @@ export default function CreateServicePage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/service");
       toast.setFlash(
         "Layanan Berhasil Dibuat",
         `Layanan "${serviceName.trim()}" telah berhasil ditambahkan ke katalog.`
@@ -368,9 +370,12 @@ export default function CreateServicePage() {
                 type="text"
                 value={aiIdea}
                 onChange={(e) => setAiIdea(e.target.value)}
-                placeholder="Misal: Sertakan instruksi link publik, garansi refill 30 hari, estimasi kecepatan..."
+                placeholder="Misal: Format link target khusus, instruksi akun publik, atau catatan tambahan (opsional)..."
                 className="w-full px-3.5 py-2 rounded-xl text-xs bg-white border border-slate-200 text-slate-800 focus:border-emerald-500 focus:outline-none placeholder:text-slate-400"
               />
+              <p className="text-[10px] text-slate-400 mt-1">
+                AI akan menyusun deskripsi murni berdasarkan data nama layanan (refill &amp; instant hanya ditambahkan bila ada pada nama layanan).
+              </p>
             </div>
 
             <div>

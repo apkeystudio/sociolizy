@@ -1,56 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { invalidateCacheTag } from "@/lib/server-cache";
-
-// Helper to call Google Gemini API
-async function callGemini(apiKey: string, prompt: string): Promise<string> {
-  const models = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3.7-flash",
-    "gemini-3.8-flash",
-    "gemini-flash-latest",
-    "gemini-pro-latest",
-  ];
-
-  let lastError = "";
-  for (const model of models) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1024,
-          },
-        }),
-      });
-
-      const json = await response.json();
-
-      if (!response.ok) {
-        lastError = json?.error?.message || `HTTP ${response.status} (${model})`;
-        continue;
-      }
-
-      const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text && typeof text === "string" && text.trim()) {
-        return text.trim();
-      }
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  throw new Error(`Gagal memanggil Gemini API: ${lastError}`);
-}
+import { generateServiceDescription } from "@/lib/service-desc-generator";
 
 // GET: Cek informasi statistik layanan yang deskripsinya kosong untuk kategori/data-detail
 export async function GET(request: Request) {
@@ -59,14 +10,14 @@ export async function GET(request: Request) {
     const dataDetailId = searchParams.get("data_detail_id");
     const categoryId = searchParams.get("id_category");
 
-    // Ambil setting API Key Gemini
-    const setting = await prisma.setting.findFirst({
-      orderBy: { id: "asc" },
-      select: { gemini_api: true },
-    });
-    const hasApiKey = Boolean(setting?.gemini_api?.trim() || process.env.GEMINI_API_KEY?.trim());
+    if (!dataDetailId && !categoryId) {
+      return NextResponse.json(
+        { success: false, message: "ID data detail atau ID kategori diperlukan" },
+        { status: 400 }
+      );
+    }
 
-    let targetCatId: number | null = null;
+    let targetCategoryId: number | null = null;
     let dataDetail = null;
 
     if (dataDetailId) {
@@ -79,12 +30,12 @@ export async function GET(request: Request) {
         },
       });
       if (dataDetail) {
-        targetCatId = dataDetail.id_category;
+        targetCategoryId = dataDetail.id_category;
       }
     } else if (categoryId) {
-      targetCatId = Number(categoryId);
+      targetCategoryId = Number(categoryId);
       dataDetail = await prisma.dataDetail.findFirst({
-        where: { id_category: targetCatId },
+        where: { id_category: targetCategoryId },
         include: {
           category: {
             select: { id: true, name: true, slug: true },
@@ -93,55 +44,42 @@ export async function GET(request: Request) {
       });
     }
 
-    if (targetCatId) {
-      const [totalServices, emptyDescServices] = await Promise.all([
-        prisma.service.count({
-          where: { id_category: targetCatId },
-        }),
-        prisma.service.count({
-          where: {
-            id_category: targetCatId,
-            OR: [{ desc: null }, { desc: "" }],
-          },
-        }),
-      ]);
-
-      return NextResponse.json({
-        success: true,
-        hasApiKey,
-        targetCatId,
-        categoryName: dataDetail?.category?.name || "Kategori",
-        conteks: dataDetail?.conteks || "",
-        totalServices,
-        emptyDescServices,
-      });
+    if (!targetCategoryId) {
+      return NextResponse.json(
+        { success: false, message: "Data detail tidak ditemukan" },
+        { status: 404 }
+      );
     }
 
-    // Global stats across all categories with DataDetail
-    const allDataDetails = await prisma.dataDetail.findMany({
-      include: {
-        category: {
-          select: { id: true, name: true },
+    // Hitung total layanan dan layanan yang deskripsinya kosong
+    const [totalServices, emptyDescServices] = await Promise.all([
+      prisma.service.count({
+        where: { id_category: targetCategoryId },
+      }),
+      prisma.service.count({
+        where: {
+          id_category: targetCategoryId,
+          OR: [{ desc: null }, { desc: "" }],
         },
-      },
-    });
+      }),
+    ]);
 
-    const totalEmpty = await prisma.service.count({
-      where: {
-        OR: [{ desc: null }, { desc: "" }],
-      },
+    // Cek apakah Gemini API key sudah diset di setting
+    const setting = await prisma.setting.findFirst({
+      orderBy: { id: "asc" },
+      select: { gemini_api: true },
     });
+    const hasApiKey = Boolean(setting?.gemini_api && setting.gemini_api.trim().length > 0);
 
     return NextResponse.json({
       success: true,
+      categoryId: targetCategoryId,
+      categoryName: dataDetail?.category?.name || "Kategori",
+      conteks: dataDetail?.conteks || "",
+      hasTitleTag: dataDetail ? /\{title\}|\{TITLE\}|\{judul\}/.test(dataDetail.conteks) : false,
+      totalServices,
+      emptyDescServices,
       hasApiKey,
-      totalEmpty,
-      availableCategories: allDataDetails.map((d) => ({
-        dataDetailId: d.id,
-        categoryId: d.id_category,
-        categoryName: d.category.name,
-        conteksPreview: d.conteks.substring(0, 100),
-      })),
     });
   } catch (error) {
     console.error("GET /api/admin/data-detail/generate error:", error);
@@ -253,29 +191,14 @@ export async function POST(request: Request) {
     const errors: string[] = [];
 
     for (const service of services) {
-      const prompt = `You are a professional copywriter for an SMM (Social Media Marketing) reseller panel.
-Your task is to write a single clean, informative, concise, and professional service description in ENGLISH for the following service:
-
-- Service Title: "${service.service_name}"
-- Service Category: "${categoryName}"
-- Minimum Order: ${service.min}
-- Maximum Order: ${service.max}
-- Context & Reference Data:
-"""
-${templateConteks}
-"""
-
-Strict Instructions:
-1. Write the entire description exclusively in ENGLISH.
-2. Carefully inspect the service title "${service.service_name}" to identify specific details (such as refill / 30 days guarantee, instant or gradual speed, non-drop quality, required target URL / link format, and account requirements).
-3. Blend and collaborate the context reference data with the service details. If the reference data contains "{title}", "{judul}", or "{TITLE}", replace it naturally with the relevant service title or feature.
-4. STRICT PROHIBITION: Do NOT use markdown bold asterisks (NEVER use '**' or '*'). Do NOT use bold markdown syntax anywhere in the text. Use clean plain text headers and bullet points with '-' instead.
-5. Provide ONLY the final service description text directly. Do NOT include conversational introductions (e.g. "Here is the description...", "Option 1:"), do NOT wrap in markdown code blocks, and do NOT include quotes at the start or end.`;
-
       try {
-        const rawDesc = await callGemini(apiKey, prompt);
-        // Ensure no ** or * markdown bold appears in the output
-        const cleanDesc = rawDesc.replace(/\*\*/g, "").replace(/\*/g, "-").trim();
+        const cleanDesc = await generateServiceDescription(apiKey, {
+          service_name: service.service_name,
+          category_name: categoryName,
+          min: service.min,
+          max: service.max,
+          context_reference: templateConteks,
+        });
 
         // Save to database if not preview
         if (!preview_only) {
@@ -326,4 +249,3 @@ Strict Instructions:
     return NextResponse.json({ success: false, message }, { status: 500 });
   }
 }
-

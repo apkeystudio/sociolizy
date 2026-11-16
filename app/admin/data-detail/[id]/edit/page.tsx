@@ -179,6 +179,9 @@ export default function EditDataDetailPage() {
             required
             className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-slate-50 border border-slate-200 text-slate-800 font-mono focus:bg-white focus:border-emerald-500 focus:outline-none resize-y leading-relaxed"
           />
+          <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+            Catatan: Gunakan konteks ini untuk panduan umum kategori (misal: format link, akun harus publik). AI akan mengekstrak detail spesifik (seperti Refill, Instant, &amp; Kecepatan) secara akurat dari nama masing-masing layanan dan tidak akan menambahkan klaim jika tidak ada pada nama layanan.
+          </p>
         </div>
 
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">

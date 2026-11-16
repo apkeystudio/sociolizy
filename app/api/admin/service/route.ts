@@ -26,7 +26,7 @@ export async function GET() {
           orderBy: { id: "desc" },
         });
       },
-      { ttlSeconds: 60, tags: ["services"] }
+      { ttlSeconds: 5, tags: ["services"] }
     );
 
     return NextResponse.json(
@@ -34,7 +34,11 @@ export async function GET() {
         success: true,
         data: services,
       },
-      { headers: getCacheHeaders(30, 60) }
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        },
+      }
     );
   } catch (error) {
     console.error("GET /api/admin/service error:", error);

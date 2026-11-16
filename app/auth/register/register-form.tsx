@@ -25,6 +25,15 @@ interface ServerRegionOption {
   code: string;
   name: string;
   flag: string;
+  serversCount?: number;
+}
+
+interface ServerNodeOption {
+  id: string;
+  group: string;
+  serverIndex: number;
+  name: string;
+  flag: string;
 }
 
 export default function RegisterForm() {
@@ -35,15 +44,13 @@ export default function RegisterForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [serverArea, setServerArea] = useState("SG");
+  const [serverArea, setServerArea] = useState("AUTO");
   const [regions, setRegions] = useState<ServerRegionOption[]>([
+    { code: "AUTO", name: "⚡ Otomatis (Rotasi Beban Server Terbaik)", flag: "🌐" },
     { code: "SG", name: "Singapore", flag: "🇸🇬" },
     { code: "DC", name: "United States (Washington DC)", flag: "🇺🇸" },
-    { code: "BOMB", name: "India (Mumbai)", flag: "🇮🇳" },
-    { code: "SYD", name: "Australia (Sydney)", flag: "🇦🇺" },
-    { code: "SF", name: "United States (San Francisco)", flag: "🇺🇸" },
-    { code: "PDX", name: "United States (Portland)", flag: "🇺🇸" },
   ]);
+  const [servers, setServers] = useState<ServerNodeOption[]>([]);
   const [isLoadingRegions, setIsLoadingRegions] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
@@ -76,7 +83,7 @@ export default function RegisterForm() {
 
   const strength = getStrengthLabel();
 
-  // Fetch dynamic active server regions from .env via /api/auth/register
+  // Fetch dynamic active server regions and nodes from .env via /api/auth/register
   useEffect(() => {
     let isMounted = true;
     setIsLoadingRegions(true);
@@ -85,8 +92,13 @@ export default function RegisterForm() {
     })
       .then((res) => res.json())
       .then((res) => {
-        if (isMounted && res.success && res.data?.regions?.length > 0) {
-          setRegions(res.data.regions);
+        if (isMounted && res.success && res.data) {
+          if (res.data.regions?.length > 0) {
+            setRegions(res.data.regions);
+          }
+          if (res.data.servers?.length > 0) {
+            setServers(res.data.servers);
+          }
           if (res.data.defaultRegion) {
             setServerArea(res.data.defaultRegion);
           }
@@ -426,14 +438,20 @@ export default function RegisterForm() {
               </div>
             </div>
 
-            {/* Server Region Selector */}
+            {/* Server Region & Auto-Rolling Selector */}
             <div>
-              <label
-                htmlFor="serverArea"
-                className="block text-xs font-semibold text-slate-300 mb-1"
-              >
-                Server Location (Region)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label
+                  htmlFor="serverArea"
+                  className="block text-xs font-semibold text-slate-300"
+                >
+                  Server Location / Cluster
+                </label>
+                <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Multi-Active Rolling
+                </span>
+              </div>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                   <Globe className="w-4 h-4" />
@@ -445,15 +463,57 @@ export default function RegisterForm() {
                   disabled={isLoadingRegions}
                   className="w-full pl-10 pr-9 py-2 rounded-xl text-sm text-white bg-slate-900/70 border border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all cursor-pointer appearance-none"
                 >
-                  {regions.map((reg) => (
-                    <option key={reg.code} value={reg.code} className="bg-white text-slate-900 py-1.5">
-                      {reg.name} ({reg.code})
-                    </option>
-                  ))}
+                  <option value="AUTO" className="bg-slate-900 text-white font-medium">
+                    ⚡ Otomatis (Rotasi Beban Server Terbaik - Rekomendasi)
+                  </option>
+                  
+                  {/* Region Groups */}
+                  {regions.filter(r => r.code !== "AUTO").length > 0 && (
+                    <optgroup label="Rotasi Berdasarkan Region" className="bg-slate-900 text-slate-300 font-semibold">
+                      {regions
+                        .filter(r => r.code !== "AUTO")
+                        .map((reg) => (
+                          <option key={`reg-${reg.code}`} value={reg.code} className="bg-white text-slate-900 py-1.5">
+                            {reg.flag} {reg.name} (Auto-Rotate {reg.code})
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+
+                  {/* Individual Active Nodes */}
+                  {servers.length > 0 && (
+                    <optgroup label="Node Server Spesifik" className="bg-slate-900 text-slate-300 font-semibold">
+                      {servers.map((srv) => (
+                        <option key={`srv-${srv.id}`} value={srv.id} className="bg-white text-slate-900 py-1.5">
+                          {srv.flag} {srv.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-500">
                   <ChevronDown className="w-4 h-4" />
                 </div>
+              </div>
+
+              {/* Dynamic Info Helper */}
+              <div className="mt-1.5">
+                {serverArea === "AUTO" ? (
+                  <p className="text-[11px] text-emerald-400/90 leading-tight flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    <span><strong>Rotasi Otomatis Aktif</strong>: Akun baru otomatis didistribusikan bergantian ke server aktif dengan beban paling ringan.</span>
+                  </p>
+                ) : serverArea.includes("_") ? (
+                  <p className="text-[11px] text-cyan-400/90 leading-tight flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                    <span>Node spesifik <strong>{serverArea}</strong> dipilih untuk akun ini.</span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-indigo-400/90 leading-tight flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                    <span>Akun akan dirotasi di antara semua node aktif di cluster region <strong>{serverArea}</strong>.</span>
+                  </p>
+                )}
               </div>
             </div>
 

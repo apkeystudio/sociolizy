@@ -96,78 +96,126 @@ export function getServersForRegion(serverArea?: string): ServerNodeConfig[] {
 }
 
 /**
- * Automatically allocates a rolling, load-balanced MongoDB server node for a user in a chosen region.
- * Distributes user assignments evenly across all configured server nodes in that region so that
- * transaction storage and database query workloads are segmented on a per-user basis.
+ * Automatically allocates a rolling, load-balanced MongoDB server node for a user.
+ * Supports:
+ *  - "AUTO" / "" / "ALL" / "GLOBAL": Full cluster multi-active rolling assignment across ALL configured servers
+ *  - Specific region (e.g. "SG", "DC"): Rolling assignment across all configured servers in that region
+ *  - Specific node (e.g. "SG_2", "DC_1"): Direct assignment to that node if configured
+ *
+ * Algorithm:
+ *  1. Determines candidate server pool.
+ *  2. Queries current user counts per server node in PostgreSQL.
+ *     Accurately maps legacy group assignments (e.g. "SG" -> primary node "SG_1").
+ *  3. Finds the least-loaded server(s).
+ *  4. Resolves ties using round-robin rotation based on the latest registered user ID.
  */
-export async function allocateRollingServerNode(requestedRegion: string = "SG"): Promise<{
+export async function allocateRollingServerNode(requestedRegion: string = "AUTO"): Promise<{
   assignedNode: string;
   regionGroup: string;
   serverNode: ServerNodeConfig | null;
 }> {
-  const normGroup = normalizeRegionGroup(requestedRegion);
-  const regionServers = getServersForRegion(normGroup);
-
-  // 1. If no servers found for this region, fallback to any configured server or SG_1
-  if (regionServers.length === 0) {
-    const allConfigured = getDiscoveredServers().filter((s) => s.isConfigured);
-    const fallbackNode = allConfigured[0]?.id || "SG_1";
+  const allConfigured = getDiscoveredServers().filter((s) => s.isConfigured);
+  if (allConfigured.length === 0) {
     return {
-      assignedNode: fallbackNode,
-      regionGroup: normGroup,
-      serverNode: allConfigured[0] || null,
+      assignedNode: "SG_1",
+      regionGroup: "SG",
+      serverNode: null,
     };
   }
 
-  // 2. If the user already provided an exact node (e.g. "SG_2"), verify and return it
-  const exact = regionServers.find((s) => s.id === requestedRegion.toUpperCase().trim());
-  if (exact) {
+  const rawTarget = (requestedRegion || "AUTO").toUpperCase().trim();
+  const isAuto =
+    rawTarget === "AUTO" ||
+    rawTarget === "ALL" ||
+    rawTarget === "GLOBAL" ||
+    rawTarget === "" ||
+    rawTarget === "DEFAULT";
+
+  let candidates: ServerNodeConfig[] = [];
+
+  if (isAuto) {
+    // Pool is ALL configured servers across all regions (e.g. SG_1, SG_2, DC_1...)
+    candidates = allConfigured;
+  } else {
+    // 1. Check exact node match (e.g. "SG_1", "SG_2", "DC_1")
+    const exact = allConfigured.find((s) => s.id.toUpperCase() === rawTarget);
+    if (exact) {
+      return {
+        assignedNode: exact.id,
+        regionGroup: exact.group,
+        serverNode: exact,
+      };
+    }
+
+    // 2. Check region match (e.g. "SG", "DC", "SIN", "WDC")
+    const normGroup = normalizeRegionGroup(rawTarget);
+    const regionServers = allConfigured.filter((s) => {
+      const g = s.group.toUpperCase();
+      return g === rawTarget || g === normGroup || normalizeRegionGroup(g) === normGroup;
+    });
+
+    if (regionServers.length > 0) {
+      candidates = regionServers;
+    } else {
+      // Fallback: If requested region has no configured servers, fallback to all configured servers
+      candidates = allConfigured;
+    }
+  }
+
+  // If only 1 candidate server exists, assign it directly
+  if (candidates.length === 1) {
     return {
-      assignedNode: exact.id,
-      regionGroup: exact.group,
-      serverNode: exact,
+      assignedNode: candidates[0].id,
+      regionGroup: candidates[0].group,
+      serverNode: candidates[0],
     };
   }
 
-  // 3. If only 1 server node configured in this region, assign it directly
-  if (regionServers.length === 1) {
-    return {
-      assignedNode: regionServers[0].id,
-      regionGroup: regionServers[0].group,
-      serverNode: regionServers[0],
-    };
-  }
-
-  // 4. If multiple servers exist in this region (e.g. SG_1, SG_2, SG_3...),
-  // calculate current user allocation per node from PostgreSQL to pick the least-loaded node (rolling assignment)
+  // Distribute across candidates using Least-Loaded + Deterministic Round-Robin tie breaker
   try {
     const { prisma } = await import("@/lib/prisma");
+
+    // 1. Group existing users by server_area from PostgreSQL
     const counts = await prisma.user.groupBy({
       by: ["server_area"],
-      where: {
-        server_area: { in: regionServers.map((s) => s.id) },
-      },
       _count: { id: true },
     });
 
     const countMap = new Map<string, number>();
     counts.forEach((c) => {
       if (c.server_area) {
-        countMap.set(c.server_area, c._count.id);
+        const areaUpper = c.server_area.toUpperCase().trim();
+        countMap.set(areaUpper, (countMap.get(areaUpper) || 0) + c._count.id);
       }
     });
 
-    // Pick the node with minimum users
-    let minCount = Infinity;
-    let chosen = regionServers[0];
+    // 2. Query the latest registered user ID to maintain seamless round-robin rotation progression
+    const lastUser = await prisma.user.findFirst({
+      orderBy: { id: "desc" },
+      select: { id: true },
+    });
+    const lastId = lastUser?.id || 0;
 
-    for (const node of regionServers) {
-      const current = countMap.get(node.id) || 0;
-      if (current < minCount) {
-        minCount = current;
-        chosen = node;
-      }
-    }
+    // 3. Compute effective load for each candidate node
+    // (Legacy users with group-only "SG" count towards the group's index 1 server)
+    const candidateLoads = candidates.map((node) => {
+      const directCount = countMap.get(node.id.toUpperCase()) || 0;
+      const groupCount = node.serverIndex === 1 ? (countMap.get(node.group.toUpperCase()) || 0) : 0;
+      return {
+        node,
+        totalUsers: directCount + groupCount,
+      };
+    });
+
+    // 4. Find the minimum user count
+    const minUsers = Math.min(...candidateLoads.map((c) => c.totalUsers));
+
+    // 5. Filter candidates that have the minimum load
+    const leastLoaded = candidateLoads.filter((c) => c.totalUsers === minUsers);
+
+    // 6. Tie-breaker: Round-robin rotate based on last registered user ID so each new user alternates
+    const chosenIndex = (lastId + 1) % leastLoaded.length;
+    const chosen = leastLoaded[chosenIndex].node;
 
     return {
       assignedNode: chosen.id,
@@ -175,9 +223,9 @@ export async function allocateRollingServerNode(requestedRegion: string = "SG"):
       serverNode: chosen,
     };
   } catch (err) {
-    // Fallback if DB query fails: pseudo-random rolling assignment
-    const idx = Math.floor(Math.random() * regionServers.length);
-    const chosen = regionServers[idx];
+    console.warn("Failed to query DB for rolling server node, using pseudo-random rotation:", err);
+    const idx = Math.floor(Math.random() * candidates.length);
+    const chosen = candidates[idx];
     return {
       assignedNode: chosen.id,
       regionGroup: chosen.group,

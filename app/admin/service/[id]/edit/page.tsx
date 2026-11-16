@@ -3,8 +3,9 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
-import { ArrowLeft, Save, Loader2, AlertCircle, Sparkles } from "lucide-react";
+import { ArrowLeft, Save, Loader2, AlertCircle, Sparkles, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function EditServicePage() {
   const router = useRouter();
@@ -28,18 +29,20 @@ export default function EditServicePage() {
   // AI Description Generation State
   const [aiIdea, setAiIdea] = useState("");
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [hasGeneratedDraft, setHasGeneratedDraft] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleGenerateAiDescription = async () => {
+  const handleGenerateAiDescription = async (saveDirectly = false) => {
     if (!serviceName.trim()) {
       toast.error("Nama Layanan Diperlukan", "Silakan isi nama layanan terlebih dahulu sebagai acuan AI.");
       return;
     }
 
     setIsGeneratingAi(true);
+    setHasGeneratedDraft(false);
     try {
       const res = await fetch("/api/admin/service/generate-desc", {
         method: "POST",
@@ -51,14 +54,27 @@ export default function EditServicePage() {
           idea: aiIdea,
           min: Number(min) || undefined,
           max: Number(max) || undefined,
-          save_to_db: false,
+          save_to_db: saveDirectly,
         }),
       });
 
       const json = await res.json();
       if (json.success && json.description) {
         setDesc(json.description);
-        toast.success("Deskripsi AI Berhasil", "Deskripsi layanan berhasil dibuat oleh AI!");
+        clientCache.invalidate("/api/admin/service");
+
+        if (saveDirectly) {
+          toast.success(
+            "Tersimpan ke Database!",
+            "Deskripsi AI berhasil dibuat dan langsung disimpan ke database."
+          );
+        } else {
+          setHasGeneratedDraft(true);
+          toast.success(
+            "Deskripsi AI Siap (Draft)",
+            "Deskripsi berhasil diisi ke form. Klik 'Simpan Perubahan' di bawah untuk menyimpannya permanen."
+          );
+        }
       } else {
         toast.error("Gagal Generate AI", json.message || "Gagal menghasilkan deskripsi.");
       }
@@ -147,6 +163,7 @@ export default function EditServicePage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/service");
       toast.setFlash(
         "Layanan Berhasil Diperbarui",
         `Perubahan data layanan "${serviceName.trim()}" berhasil disimpan.`
@@ -336,26 +353,48 @@ export default function EditServicePage() {
                     Ketik manual atau gunakan AI untuk membuat deskripsi profesional otomatis.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleGenerateAiDescription}
-                  disabled={isGeneratingAi || !serviceName.trim()}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm self-start sm:self-auto"
-                  title="Generate deskripsi menggunakan Google Gemini AI"
-                >
-                  {isGeneratingAi ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Menghasilkan...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Generate AI</span>
-                    </>
-                  )}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateAiDescription(true)}
+                    disabled={isGeneratingAi || !serviceName.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+                    title="Generate dengan Gemini AI dan langsung simpan permanen ke database"
+                  >
+                    {isGeneratingAi ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Memproses...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Generate &amp; Simpan ke DB</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateAiDescription(false)}
+                    disabled={isGeneratingAi || !serviceName.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+                    title="Generate ke form di bawah untuk direview/diedit manual terlebih dahulu"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Generate ke Form (Draft)</span>
+                  </button>
+                </div>
               </div>
+
+              {hasGeneratedDraft && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <span>
+                    <strong>Deskripsi AI telah diisi ke textarea di bawah (Draft).</strong> Anda dapat meninjau atau mengedit teksnya, lalu klik tombol <strong>"Update Layanan"</strong> di bagian paling bawah untuk menyimpannya permanen ke database.
+                  </span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -365,9 +404,12 @@ export default function EditServicePage() {
                   type="text"
                   value={aiIdea}
                   onChange={(e) => setAiIdea(e.target.value)}
-                  placeholder="Misal: Sertakan instruksi link publik, garansi refill 30 hari, estimasi kecepatan..."
+                  placeholder="Misal: Format link target khusus, instruksi akun publik, atau catatan tambahan (opsional)..."
                   className="w-full px-3.5 py-2 rounded-xl text-xs bg-white border border-slate-200 text-slate-800 focus:border-emerald-500 focus:outline-none placeholder:text-slate-400"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  AI akan menyusun deskripsi murni berdasarkan data nama layanan (refill &amp; instant hanya ditambahkan bila ada pada nama layanan).
+                </p>
               </div>
 
               <div>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import { getDiscoveredRegions, getActiveClusterConfig } from "@/lib/server-db";
+import { getDiscoveredRegions, getDiscoveredServers, getActiveClusterConfig } from "@/lib/server-db";
 import { allocateRollingServerNode } from "@/lib/mongodb";
 import { sendRegistrationEmail } from "@/lib/resend";
 import { createSessionToken } from "@/lib/auth";
@@ -19,17 +19,33 @@ export async function GET(request: Request) {
       return appCheck.errorResponse!;
     }
 
+    const allConfigured = getDiscoveredServers().filter((s) => s.isConfigured);
     const regions = getDiscoveredRegions();
-    const active = getActiveClusterConfig();
 
     return NextResponse.json({
       success: true,
       data: {
-        defaultRegion: active.group || "SG",
-        regions: regions.map((r) => ({
-          code: r.code,
-          name: r.name,
-          flag: r.flag,
+        defaultRegion: "AUTO",
+        regions: [
+          {
+            code: "AUTO",
+            name: "⚡ Otomatis (Rotasi Beban Server Terbaik)",
+            flag: "🌐",
+            serversCount: allConfigured.length,
+          },
+          ...regions.map((r) => ({
+            code: r.code,
+            name: r.name,
+            flag: r.flag,
+            serversCount: r.serversCount,
+          })),
+        ],
+        servers: allConfigured.map((s) => ({
+          id: s.id,
+          group: s.group,
+          serverIndex: s.serverIndex,
+          name: `${s.regionName} (Node ${s.serverIndex})`,
+          flag: s.flag,
         })),
       },
     });
@@ -44,7 +60,7 @@ export async function GET(request: Request) {
 
 /**
  * POST /api/mobile/v1/auth/register
- * Mobile user registration with server_area selection
+ * Mobile user registration with server_area selection and auto-rolling rotation
  */
 export async function POST(request: Request) {
   try {
@@ -56,7 +72,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const { username, email, password, confirmPassword, server_area, server_region, name } = body;
 
-    const selectedArea = (server_area || server_region || "SG").toUpperCase().trim();
+    const selectedArea = (server_area || server_region || "AUTO").toUpperCase().trim();
 
     if (!username || !email || !password) {
       return NextResponse.json(
@@ -123,6 +139,9 @@ export async function POST(request: Request) {
     // Auto-generate 16-char alphanumeric API Key
     const generatedApiKey = "smm_" + crypto.randomBytes(8).toString("hex");
 
+    // Allocate MongoDB server node via rolling load balancer
+    const { assignedNode } = await allocateRollingServerNode(selectedArea);
+
     // Create user in PostgreSQL
     const newUser = await prisma.user.create({
       data: {
@@ -133,16 +152,9 @@ export async function POST(request: Request) {
         level: "Member",
         balance: 0,
         api_key: generatedApiKey,
-        server_area: selectedArea,
+        server_area: assignedNode,
       },
     });
-
-    // Allocate MongoDB server node
-    try {
-      await allocateRollingServerNode(selectedArea);
-    } catch (allocErr) {
-      console.warn("Failed to pre-allocate MongoDB server node:", allocErr);
-    }
 
     // Send Welcome Email via Resend
     try {

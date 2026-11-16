@@ -2,27 +2,43 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import { getDiscoveredRegions, getActiveClusterConfig } from "@/lib/server-db";
+import { getDiscoveredRegions, getDiscoveredServers, getActiveClusterConfig } from "@/lib/server-db";
 import { allocateRollingServerNode } from "@/lib/mongodb";
 import { sendRegistrationEmail } from "@/lib/resend";
 import { traceUserActivity, extractClientIp } from "@/lib/trace-logger";
 
 /**
- * GET: Retrieve active cluster regions detected in environment
+ * GET: Retrieve active cluster regions and server nodes detected in environment
  */
 export async function GET() {
   try {
+    const allConfigured = getDiscoveredServers().filter((s) => s.isConfigured);
     const regions = getDiscoveredRegions();
-    const active = getActiveClusterConfig();
 
     return NextResponse.json({
       success: true,
       data: {
-        defaultRegion: active.group || "SG",
-        regions: regions.map((r) => ({
-          code: r.code,
-          name: r.name,
-          flag: r.flag,
+        defaultRegion: "AUTO",
+        regions: [
+          {
+            code: "AUTO",
+            name: "⚡ Otomatis (Rotasi Beban Server Terbaik)",
+            flag: "🌐",
+            serversCount: allConfigured.length,
+          },
+          ...regions.map((r) => ({
+            code: r.code,
+            name: r.name,
+            flag: r.flag,
+            serversCount: r.serversCount,
+          })),
+        ],
+        servers: allConfigured.map((s) => ({
+          id: s.id,
+          group: s.group,
+          serverIndex: s.serverIndex,
+          name: `${s.regionName} (Node ${s.serverIndex})`,
+          flag: s.flag,
         })),
       },
     });
@@ -36,7 +52,7 @@ export async function GET() {
 }
 
 /**
- * POST: Register new user with selected cluster region
+ * POST: Register new user with selected cluster region or auto-rolling rotation
  */
 export async function POST(request: Request) {
   const startTime = Date.now();
@@ -47,7 +63,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const { name, username, email, password, confirmPassword, server_area, server_region } = body;
 
-    const selectedArea = (server_area || server_region || "SG").toUpperCase().trim();
+    const selectedArea = (server_area || server_region || "AUTO").toUpperCase().trim();
 
     // Input validation
     if (!name || !username || !email || !password) {

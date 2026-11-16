@@ -21,6 +21,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 interface DataDetailItem {
   id: number;
@@ -302,6 +303,7 @@ export default function DataDetailPage() {
           }));
           toast.success("Preview Ready", "Sample AI description generated in English.");
         } else {
+          clientCache.invalidate("/api/admin/service");
           setGenerateModal((prev) => ({
             ...prev,
             isGenerating: false,
@@ -617,8 +619,16 @@ export default function DataDetailPage() {
                   <h3 className="font-black text-slate-900 text-base sm:text-lg tracking-tight">
                     Generate Service Descriptions (Gemini AI)
                   </h3>
-                  <span className="text-xs font-bold text-emerald-700">
-                    Category: {generateModal.categoryName}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-emerald-700">
+                      Category: {generateModal.categoryName}
+                    </span>
+                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-full border border-emerald-200">
+                      Strict Data Fidelity
+                    </span>
+                  </div>
+                  <span className="block text-[11px] text-slate-500 font-normal mt-0.5">
+                    Refill &amp; Instant hanya akan disertakan jika tertera di nama masing-masing layanan.
                   </span>
                 </div>
               </div>

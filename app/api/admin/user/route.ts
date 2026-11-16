@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     const hashedPassword = await bcrypt.hash(password, 10);
     const apiKey = `smm_${crypto.randomBytes(16).toString("hex")}`;
 
-    const requestedArea = (body.server_area || body.server_region || "SG").toUpperCase().trim();
+    const requestedArea = (body.server_area || body.server_region || "AUTO").toUpperCase().trim();
     const { assignedNode } = await allocateRollingServerNode(requestedArea);
 
     const newUser = await prisma.user.create({

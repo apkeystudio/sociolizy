@@ -15,12 +15,15 @@ import {
   RefreshCw,
   Sparkles,
   FileText,
+  X,
+  Eye,
+  Settings,
 } from "lucide-react";
 
 import TablePagination from "@/app/admin/components/table-pagination";
 import ConfirmModal from "@/app/admin/components/confirm-modal";
 import { useToast } from "@/app/admin/components/toast-context";
-import { useCachedFetch } from "@/lib/client-cache";
+import { useCachedFetch, clientCache } from "@/lib/client-cache";
 
 export default function AdminServicePage() {
   const { toast } = useToast();
@@ -30,7 +33,7 @@ export default function AdminServicePage() {
     isRefreshing,
     refresh: fetchServices,
     mutate,
-  } = useCachedFetch<any[]>("/api/admin/service", { ttlMs: 60_000 });
+  } = useCachedFetch<any[]>("/api/admin/service", { ttlMs: 5_000 });
 
   const services = useMemo(() => servicesData || [], [servicesData]);
   const [search, setSearch] = useState("");
@@ -73,6 +76,41 @@ export default function AdminServicePage() {
     desc: "",
   });
 
+  // Modal Generate AI Semua Layanan
+  const [generateAllModal, setGenerateAllModal] = useState<{
+    isOpen: boolean;
+    isLoadingStats: boolean;
+    isGenerating: boolean;
+    hasApiKey: boolean;
+    totalServices: number;
+    emptyDescServices: number;
+    filledDescServices: number;
+    categories: Array<{ id: number; name: string; total: number; empty: number }>;
+    selectedCategory: string;
+    onlyEmpty: boolean;
+    limit: number;
+    previewDesc: string | null;
+    previewServiceName: string | null;
+    results: Array<{ id: number; service_name: string; desc: string }> | null;
+    error: string | null;
+  }>({
+    isOpen: false,
+    isLoadingStats: false,
+    isGenerating: false,
+    hasApiKey: true,
+    totalServices: 0,
+    emptyDescServices: 0,
+    filledDescServices: 0,
+    categories: [],
+    selectedCategory: "all",
+    onlyEmpty: true,
+    limit: 20,
+    previewDesc: null,
+    previewServiceName: null,
+    results: null,
+    error: null,
+  });
+
   const handleGenerateSingle = async (service: any) => {
     setGeneratingId(service.id);
     try {
@@ -94,13 +132,15 @@ export default function AdminServicePage() {
           "Deskripsi AI Berhasil",
           `Deskripsi untuk "${service.service_name}" berhasil dibuat dan disimpan.`
         );
+        clientCache.invalidate("/api/admin/service");
         mutate((prev) =>
           prev
             ? prev.map((item: any) =>
-                item.id === service.id ? { ...item, desc: json.description } : item
-              )
+              item.id === service.id ? { ...item, desc: json.description } : item
+            )
             : []
         );
+        fetchServices(true);
       } else {
         toast.error("Gagal Generate AI", json.message || "Gagal menghasilkan deskripsi.");
       }
@@ -128,20 +168,22 @@ export default function AdminServicePage() {
           "Generate AI Berhasil",
           json.message || `Berhasil menghasilkan deskripsi untuk ${json.count} layanan.`
         );
+        clientCache.invalidate("/api/admin/service");
         if (Array.isArray(json.updated)) {
           const updatedMap = new Map<number, string>();
           json.updated.forEach((u: any) => updatedMap.set(u.id, u.desc));
           mutate((prev) =>
             prev
               ? prev.map((item: any) =>
-                  updatedMap.has(item.id)
-                    ? { ...item, desc: updatedMap.get(item.id) }
-                    : item
-                )
+                updatedMap.has(item.id)
+                  ? { ...item, desc: updatedMap.get(item.id) }
+                  : item
+              )
               : []
           );
         }
         setSelectedIds(new Set());
+        fetchServices(true);
       } else {
         toast.error("Gagal Bulk Generate", json.message || "Gagal menghasilkan deskripsi.");
       }
@@ -149,6 +191,126 @@ export default function AdminServicePage() {
       toast.error("Kesalahan Jaringan", err?.message || "Terjadi kesalahan.");
     } finally {
       setIsBulkGenerating(false);
+    }
+  };
+
+  const handleOpenGenerateAllModal = async () => {
+    setGenerateAllModal((prev) => ({
+      ...prev,
+      isOpen: true,
+      isLoadingStats: true,
+      previewDesc: null,
+      results: null,
+      error: null,
+    }));
+
+    try {
+      const res = await fetch("/api/admin/service/generate-desc");
+      const json = await res.json();
+      if (json.success) {
+        setGenerateAllModal((prev) => ({
+          ...prev,
+          isLoadingStats: false,
+          hasApiKey: json.hasApiKey ?? true,
+          totalServices: json.totalServices ?? 0,
+          emptyDescServices: json.emptyDescServices ?? 0,
+          filledDescServices: json.filledDescServices ?? 0,
+          categories: json.categories || [],
+        }));
+      } else {
+        setGenerateAllModal((prev) => ({
+          ...prev,
+          isLoadingStats: false,
+          error: json.message || "Gagal memuat statistik",
+        }));
+      }
+    } catch (err: any) {
+      setGenerateAllModal((prev) => ({
+        ...prev,
+        isLoadingStats: false,
+        error: "Gagal menghubungkan ke server",
+      }));
+    }
+  };
+
+  const handleRunGenerateAll = async (previewOnly = false) => {
+    setGenerateAllModal((prev) => ({
+      ...prev,
+      isGenerating: true,
+      error: null,
+    }));
+
+    try {
+      const res = await fetch("/api/admin/service/generate-desc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generate_all: true,
+          id_category:
+            generateAllModal.selectedCategory !== "all"
+              ? Number(generateAllModal.selectedCategory)
+              : undefined,
+          only_empty: generateAllModal.onlyEmpty,
+          limit: generateAllModal.limit,
+          preview_only: previewOnly,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (json.success) {
+        if (previewOnly) {
+          const sample = json.updated?.[0];
+          setGenerateAllModal((prev) => ({
+            ...prev,
+            isGenerating: false,
+            previewDesc: sample?.desc || "Tidak dapat membuat pratinjau",
+            previewServiceName: sample?.service_name || "Contoh Layanan",
+          }));
+          toast.success("Pratinjau Siap", "Contoh deskripsi AI berhasil dibuat.");
+        } else {
+          setGenerateAllModal((prev) => ({
+            ...prev,
+            isGenerating: false,
+            results: json.updated || [],
+            emptyDescServices: Math.max(0, prev.emptyDescServices - (json.count || 0)),
+            filledDescServices: prev.filledDescServices + (json.count || 0),
+          }));
+          toast.success(
+            "Generate AI Berhasil",
+            `Berhasil menghasilkan deskripsi untuk ${json.count || 0} layanan.`
+          );
+          clientCache.invalidate("/api/admin/service");
+          if (Array.isArray(json.updated) && json.updated.length > 0) {
+            const updatedMap = new Map<number, string>();
+            json.updated.forEach((u: any) => updatedMap.set(u.id, u.desc));
+            mutate((prev) =>
+              prev
+                ? prev.map((item: any) =>
+                  updatedMap.has(item.id)
+                    ? { ...item, desc: updatedMap.get(item.id) }
+                    : item
+                )
+                : []
+            );
+          }
+          fetchServices(true);
+        }
+      } else {
+        setGenerateAllModal((prev) => ({
+          ...prev,
+          isGenerating: false,
+          error: json.message || "Gagal memproses generate deskripsi",
+        }));
+        toast.error("Gagal Generate AI", json.message || "Terjadi kesalahan.");
+      }
+    } catch (err: any) {
+      setGenerateAllModal((prev) => ({
+        ...prev,
+        isGenerating: false,
+        error: "Kesalahan jaringan saat memproses generate AI.",
+      }));
+      toast.error("Kesalahan Jaringan", err?.message || "Koneksi gagal.");
     }
   };
 
@@ -307,6 +469,16 @@ export default function AdminServicePage() {
               <span>Import</span>
             </Link>
 
+            <button
+              type="button"
+              onClick={handleOpenGenerateAllModal}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-300 transition-colors whitespace-nowrap cursor-pointer shadow-xs active:scale-[0.98]"
+              title="Generate deskripsi otomatis untuk semua layanan menggunakan Gemini AI"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Generate AI Semua</span>
+            </button>
+
             <Link
               href="/admin/service/create"
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] shadow-xs shadow-emerald-600/20 transition-all whitespace-nowrap cursor-pointer"
@@ -412,9 +584,8 @@ export default function AdminServicePage() {
                     return (
                       <tr
                         key={s.id}
-                        className={`transition-colors ${
-                          isSelected ? "bg-emerald-50/40" : "hover:bg-slate-50/70"
-                        }`}
+                        className={`transition-colors ${isSelected ? "bg-emerald-50/40" : "hover:bg-slate-50/70"
+                          }`}
                       >
                         <td className="py-3.5 px-4 text-center">
                           <input
@@ -608,6 +779,311 @@ export default function AdminServicePage() {
               >
                 Tutup
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Generate AI Semua Layanan */}
+      {generateAllModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl border border-slate-200 max-w-2xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base sm:text-lg tracking-tight">
+                    Generate Deskripsi Otomatis (Gemini AI)
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-slate-500 font-medium">
+                      Otomatisasi deskripsi untuk katalog layanan Anda
+                    </span>
+                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-full border border-emerald-200">
+                      Strict Data Fidelity
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setGenerateAllModal((prev) => ({
+                    ...prev,
+                    isOpen: false,
+                    previewDesc: null,
+                    results: null,
+                  }))
+                }
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Warning if API Key missing */}
+            {!generateAllModal.hasApiKey && (
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">API Key Gemini Diperlukan:</span>
+                    <p className="mt-0.5 text-amber-700">
+                      Silakan masukkan Google Gemini API Key di Pengaturan Sistem terlebih dahulu sebelum menjalankan generate.
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/admin/setting"
+                  target="_blank"
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shrink-0 inline-flex items-center gap-1.5 shadow-xs"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  <span>Buka Pengaturan</span>
+                </Link>
+              </div>
+            )}
+
+            {/* Error Message if any */}
+            {generateAllModal.error && (
+              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{generateAllModal.error}</span>
+              </div>
+            )}
+
+            {/* Statistics Cards */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Total Layanan
+                </span>
+                <div className="text-lg font-black text-slate-900 mt-0.5">
+                  {generateAllModal.isLoadingStats ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                  ) : (
+                    `${generateAllModal.totalServices}`
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 shadow-2xs">
+                <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
+                  Belum Ada Deskripsi
+                </span>
+                <div className="text-lg font-black text-amber-700 mt-0.5">
+                  {generateAllModal.isLoadingStats ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                  ) : (
+                    `${generateAllModal.emptyDescServices}`
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200 shadow-2xs">
+                <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">
+                  Sudah Terisi
+                </span>
+                <div className="text-lg font-black text-emerald-700 mt-0.5">
+                  {generateAllModal.isLoadingStats ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                  ) : (
+                    `${generateAllModal.filledDescServices}`
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Filter & Options */}
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Pilih Kategori Layanan:
+                </label>
+                <select
+                  value={generateAllModal.selectedCategory}
+                  onChange={(e) =>
+                    setGenerateAllModal((prev) => ({
+                      ...prev,
+                      selectedCategory: e.target.value,
+                    }))
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-slate-50 border border-slate-200 text-slate-800 font-medium focus:bg-white focus:border-emerald-500 focus:outline-none cursor-pointer"
+                >
+                  <option value="all">
+                    Semua Kategori ({generateAllModal.emptyDescServices} layanan kosong)
+                  </option>
+                  {generateAllModal.categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.empty} kosong dari {c.total})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={generateAllModal.onlyEmpty}
+                  onChange={(e) =>
+                    setGenerateAllModal((prev) => ({
+                      ...prev,
+                      onlyEmpty: e.target.checked,
+                    }))
+                  }
+                  className="w-4 h-4 rounded text-emerald-600 accent-emerald-600 cursor-pointer"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-slate-800">
+                    Hanya isi layanan yang belum memiliki deskripsi
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    Rekomendasi: Layanan yang sudah memiliki deskripsi tidak akan ditimpa ulang.
+                  </p>
+                </div>
+              </label>
+
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div>
+                  <span className="text-xs font-bold text-slate-800">
+                    Batas Proses per Batch:
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    Jumlah layanan yang diproses per batch eksekusi
+                  </p>
+                </div>
+                <select
+                  value={generateAllModal.limit}
+                  onChange={(e) =>
+                    setGenerateAllModal((prev) => ({
+                      ...prev,
+                      limit: Number(e.target.value),
+                    }))
+                  }
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-800 focus:outline-none cursor-pointer"
+                >
+                  <option value={10}>10 Layanan per Batch</option>
+                  <option value={20}>20 Layanan per Batch</option>
+                  <option value={50}>50 Layanan per Batch</option>
+                  <option value={100}>100 Layanan per Batch</option>
+                  <option value={250}>Semua Layanan Sekaligus (Sampai Selesai)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Single Service Preview */}
+            {generateAllModal.previewDesc && (
+              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-2 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-600" />
+                    <span>Pratinjau Sampel AI: {generateAllModal.previewServiceName}</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                    Draft Preview
+                  </span>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-amber-200 text-xs font-mono text-slate-800 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+                  {generateAllModal.previewDesc}
+                </div>
+                <p className="text-[11px] text-amber-800 leading-tight">
+                  ℹ️ Ini hanya contoh pratinjau dan <strong>belum disimpan ke database</strong>. Klik tombol hijau <strong>"Mulai Generate Semua"</strong> di bawah untuk menerapkan dan menyimpannya permanen.
+                </p>
+              </div>
+            )}
+
+            {/* Finished Results List */}
+            {generateAllModal.results && generateAllModal.results.length > 0 && (
+              <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2.5 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>
+                      Tersimpan ke Database ({generateAllModal.results.length} Layanan):
+                    </span>
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                    Tersimpan Permanen
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-800">
+                  ✅ Seluruh deskripsi di bawah telah berhasil diperbarui di database PostgreSQL dan tabel katalog telah disinkronkan.
+                </p>
+                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                  {generateAllModal.results.map((res) => (
+                    <div
+                      key={res.id}
+                      className="p-2.5 rounded-xl bg-white border border-emerald-200 text-xs space-y-1"
+                    >
+                      <div className="font-bold text-slate-900 font-mono">
+                        #{res.id} {res.service_name}
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-600 line-clamp-2">
+                        {res.desc}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={generateAllModal.isGenerating || generateAllModal.isLoadingStats}
+                onClick={() => handleRunGenerateAll(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+              >
+                {generateAllModal.isGenerating ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                ) : (
+                  <Eye className="w-3.5 h-3.5 text-slate-500" />
+                )}
+                <span>Pratinjau Sample</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setGenerateAllModal((prev) => ({
+                      ...prev,
+                      isOpen: false,
+                      previewDesc: null,
+                      results: null,
+                    }))
+                  }
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    generateAllModal.isGenerating ||
+                    !generateAllModal.hasApiKey ||
+                    (generateAllModal.emptyDescServices === 0 && generateAllModal.onlyEmpty)
+                  }
+                  onClick={() => handleRunGenerateAll(false)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm transition-all shadow-md shadow-emerald-600/20 disabled:opacity-50 cursor-pointer"
+                >
+                  {generateAllModal.isGenerating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Sedang Generate AI...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>Mulai Generate Semua</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
