@@ -30,6 +30,7 @@ interface ServerRegionOption {
 export default function RegisterForm() {
   const router = useRouter();
 
+  const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -108,13 +109,40 @@ export default function RegisterForm() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!username.trim() || !email.trim() || !password) {
+    const cleanName = name.trim();
+    const cleanUsername = username.trim();
+    const cleanEmail = email.trim();
+
+    if (!cleanName || !cleanUsername || !cleanEmail || !password) {
       setErrorMessage("Please complete all required fields.");
       return;
     }
 
-    if (username.length < 3) {
-      setErrorMessage("Username must be at least 3 characters long.");
+    // Name Validation: Cannot be email, only letters, numbers, spaces
+    if (cleanName.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanName)) {
+      setErrorMessage("Full Name cannot be an email address.");
+      return;
+    }
+    const nameRegex = /^[a-zA-Z0-9\s]{2,50}$/;
+    if (!nameRegex.test(cleanName)) {
+      setErrorMessage("Full Name can only contain letters, numbers, and spaces (no email or special symbols).");
+      return;
+    }
+
+    // Username Validation: Cannot be email, only alphanumeric and underscore, no spaces
+    if (cleanUsername.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanUsername)) {
+      setErrorMessage("Username cannot be an email address.");
+      return;
+    }
+    const usernameRegex = /^[a-zA-Z0-9_]{3,30}$/;
+    if (!usernameRegex.test(cleanUsername)) {
+      setErrorMessage("Username can only contain letters, numbers, and underscores (3-30 characters, no email, spaces, or symbols).");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      setErrorMessage("Please enter a valid email address.");
       return;
     }
 
@@ -143,8 +171,9 @@ export default function RegisterForm() {
           "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify({
-          username,
-          email,
+          name: cleanName,
+          username: cleanUsername,
+          email: cleanEmail,
           password,
           confirmPassword,
           server_area: serverArea,
@@ -163,8 +192,9 @@ export default function RegisterForm() {
 
       try {
         posthog.capture("user_registered", {
-          username,
-          email,
+          name: cleanName,
+          username: cleanUsername,
+          email: cleanEmail,
           server_area: serverArea,
         });
       } catch {}
@@ -211,6 +241,34 @@ export default function RegisterForm() {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-3">
+            {/* Full Name Input */}
+            <div>
+              <label
+                htmlFor="name"
+                className="block text-xs font-semibold text-slate-300 mb-1"
+              >
+                Nama Lengkap / Full Name
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <User className="w-4 h-4" />
+                </div>
+                <input
+                  id="name"
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value.replace(/[^a-zA-Z0-9\s]/g, ""))}
+                  placeholder="Masukkan nama lengkap (hanya huruf & angka)"
+                  autoComplete="name"
+                  className="w-full pl-10 pr-4 py-2 rounded-xl text-sm text-white placeholder-slate-500 bg-slate-900/70 border border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Hanya huruf, angka, dan spasi (tanpa email atau karakter khusus).
+              </p>
+            </div>
+
             {/* Username Input */}
             <div>
               <label
@@ -228,12 +286,15 @@ export default function RegisterForm() {
                   type="text"
                   required
                   value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/\s+/g, ""))}
-                  placeholder="Choose a username (e.g. johndoe)"
+                  onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))}
+                  placeholder="Pilih username (contoh: johndoe)"
                   autoComplete="username"
                   className="w-full pl-10 pr-4 py-2 rounded-xl text-sm text-white placeholder-slate-500 bg-slate-900/70 border border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
                 />
               </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Hanya huruf, angka, dan underscore (_) (tanpa email atau spasi).
+              </p>
             </div>
 
             {/* Email Input */}

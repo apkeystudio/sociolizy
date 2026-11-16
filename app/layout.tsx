@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "https://sociolizy.com"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "https://www.sociolizy.com"),
   title: {
-    default: "Sociolizy - #1 Best & Cheapest SMM Panel & Crypto Payment Gateway",
+    default: "SMM Panel: World's #1 Cheapest & Best SMM Services Provider",
     template: "%s | Sociolizy",
   },
   description:
@@ -38,10 +38,10 @@ export const metadata: Metadata = {
     canonical: "./",
   },
   openGraph: {
-    title: "Sociolizy - #1 Best & Cheapest SMM Panel & Crypto Payment Gateway",
+    title: "SMM Panel: World's #1 Cheapest & Best SMM Services Provider",
     description:
       "Grow your social presence with Sociolizy. Automated wholesale SMM services and 100% white-label cryptocurrency payment gateway.",
-    url: "https://sociolizy.com",
+    url: "https://www.sociolizy.com",
     siteName: "Sociolizy",
     images: [
       {
@@ -56,7 +56,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Sociolizy - #1 Best & Cheapest SMM Panel for Resellers",
+    title: "SMM Panel: World's #1 Cheapest & Best SMM Services Provider",
     description:
       "The cheapest automated SMM panel and direct crypto payment gateway for merchants.",
     images: ["/og-image.jpg"],
@@ -82,8 +82,8 @@ const aiJsonLd = {
   "@graph": [
     {
       "@type": "WebSite",
-      "@id": "https://sociolizy.com/#website",
-      "url": "https://sociolizy.com",
+      "@id": "https://www.sociolizy.com/#website",
+      "url": "https://www.sociolizy.com",
       "name": "Sociolizy",
       "description": "The #1 cheapest automated wholesale SMM reseller panel and white-label cryptocurrency merchant payment gateway.",
       "potentialAction": {
@@ -94,10 +94,10 @@ const aiJsonLd = {
     },
     {
       "@type": "Organization",
-      "@id": "https://sociolizy.com/#organization",
+      "@id": "https://www.sociolizy.com/#organization",
       "name": "Sociolizy",
-      "url": "https://sociolizy.com",
-      "logo": "https://sociolizy.com/logo/logo.png"
+      "url": "https://www.sociolizy.com",
+      "logo": "https://www.sociolizy.com/logo/logo.png"
     },
     {
       "@type": "SoftwareApplication",

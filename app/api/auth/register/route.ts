@@ -45,12 +45,12 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json().catch(() => ({}));
-    const { username, email, password, confirmPassword, server_area, server_region } = body;
+    const { name, username, email, password, confirmPassword, server_area, server_region } = body;
 
     const selectedArea = (server_area || server_region || "SG").toUpperCase().trim();
 
     // Input validation
-    if (!username || !email || !password) {
+    if (!name || !username || !email || !password) {
       traceUserActivity({
         action: "AUTH_REGISTER",
         status: "FAILED",
@@ -65,20 +65,49 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json(
-        { success: false, message: "All required fields must be filled." },
+        { success: false, message: "All required fields must be filled (Name, Username, Email, Password)." },
         { status: 400 }
       );
     }
 
-    if (username.length < 3) {
+    const cleanName = String(name).trim();
+    const cleanUsername = String(username).trim();
+    const cleanEmail = String(email).trim().toLowerCase();
+
+    // 1. Strict Name Validation: Cannot be email and cannot contain symbols/special characters
+    if (cleanName.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanName)) {
       return NextResponse.json(
-        { success: false, message: "Username must be at least 3 characters long." },
+        { success: false, message: "Name cannot be an email address." },
+        { status: 400 }
+      );
+    }
+
+    const nameRegex = /^[a-zA-Z0-9\s]{2,50}$/;
+    if (!nameRegex.test(cleanName)) {
+      return NextResponse.json(
+        { success: false, message: "Name can only contain letters, numbers, and spaces (2-50 characters, no symbols or special characters)." },
+        { status: 400 }
+      );
+    }
+
+    // 2. Strict Username Validation: Cannot be email and cannot contain symbols or spaces
+    if (cleanUsername.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanUsername)) {
+      return NextResponse.json(
+        { success: false, message: "Username cannot be an email address." },
+        { status: 400 }
+      );
+    }
+
+    const usernameRegex = /^[a-zA-Z0-9_]{3,30}$/;
+    if (!usernameRegex.test(cleanUsername)) {
+      return NextResponse.json(
+        { success: false, message: "Username can only contain letters, numbers, and underscores (3-30 characters, no email, spaces, or symbols)." },
         { status: 400 }
       );
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(cleanEmail)) {
       return NextResponse.json(
         { success: false, message: "Invalid email address format." },
         { status: 400 }
@@ -103,14 +132,14 @@ export async function POST(request: Request) {
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
-          { username: { equals: username.trim(), mode: "insensitive" } },
-          { email: { equals: email.trim().toLowerCase(), mode: "insensitive" } },
+          { username: { equals: cleanUsername, mode: "insensitive" } },
+          { email: { equals: cleanEmail, mode: "insensitive" } },
         ],
       },
     });
 
     if (existingUser) {
-      if (existingUser.username.toLowerCase() === username.trim().toLowerCase()) {
+      if (existingUser.username.toLowerCase() === cleanUsername.toLowerCase()) {
         return NextResponse.json(
           { success: false, message: "Username is already taken. Please choose another." },
           { status: 409 }
@@ -134,8 +163,9 @@ export async function POST(request: Request) {
     // Create user in PostgreSQL
     const newUser = await prisma.user.create({
       data: {
-        username: username.trim(),
-        email: email.trim().toLowerCase(),
+        name: cleanName,
+        username: cleanUsername,
+        email: cleanEmail,
         password: hashedPassword,
         balance: 0,
         level: "Member",
@@ -145,6 +175,7 @@ export async function POST(request: Request) {
       select: {
         id: true,
         uuid: true,
+        name: true,
         username: true,
         email: true,
         level: true,

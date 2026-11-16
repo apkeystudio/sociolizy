@@ -103,14 +103,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.9,
     },
 
-    // Custom Page Directory (Page Show Index)
-    {
-      url: `${baseUrl}/page/show`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.85,
-    },
-
     // Panduan & Dokumentasi
     {
       url: `${baseUrl}/documentasi`,
@@ -123,19 +115,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: now,
       changeFrequency: "weekly",
       priority: 0.85,
-    },
-    // LLM & AI Discovery Indices
-    {
-      url: `${baseUrl}/llms.txt`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.95,
-    },
-    {
-      url: `${baseUrl}/llms-full.txt`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.9,
     },
 
     // Informasi Perusahaan & Legalitas
