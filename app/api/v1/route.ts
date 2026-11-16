@@ -7,6 +7,7 @@ import {
   getOrderByIdForUser,
   getOrdersByIdsForUser,
 } from "@/lib/mongodb";
+import { traceSmmApi, extractClientIp } from "@/lib/trace-logger";
 
 /**
  * Robust parameter parser supporting:
@@ -91,38 +92,53 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   await connection();
+  const startTime = Date.now();
+  const ip = extractClientIp(request);
+  const userAgent = request.headers.get("user-agent");
+  let capturedParams: any = null;
+  let capturedUser: any = null;
+  let capturedAction: string = "unknown";
 
-  try {
-    const params = await parseParams(request);
+  const executePost = async (): Promise<NextResponse> => {
+    try {
+      const params = await parseParams(request);
+      capturedParams = params;
 
-    // 1. Authenticate API Key
-    const apiKeyRaw = params.key || params.api_key;
-    if (!apiKeyRaw || typeof apiKeyRaw !== "string" || !apiKeyRaw.trim()) {
-      return NextResponse.json(
-        { error: "Incorrect request: 'key' is required" },
-        { status: 400 }
-      );
-    }
+      // 1. Authenticate API Key
+      const apiKeyRaw = params.key || params.api_key;
+      if (!apiKeyRaw || typeof apiKeyRaw !== "string" || !apiKeyRaw.trim()) {
+        capturedAction = "AUTH_KEY";
+        return NextResponse.json(
+          { error: "Incorrect request: 'key' is required" },
+          { status: 400 }
+        );
+      }
 
-    const cleanApiKey = apiKeyRaw.trim();
-    const user = await prisma.user.findFirst({
-      where: { api_key: cleanApiKey },
-    });
+      const cleanApiKey = apiKeyRaw.trim();
+      const user = await prisma.user.findFirst({
+        where: { api_key: cleanApiKey },
+      });
 
-    if (!user) {
-      return NextResponse.json(
-        { error: "Invalid API key" },
-        { status: 401 }
-      );
-    }
+      if (!user) {
+        capturedAction = "AUTH_KEY";
+        return NextResponse.json(
+          { error: "Invalid API key" },
+          { status: 401 }
+        );
+      }
 
-    const action = String(params.action || "").trim().toLowerCase();
-    if (!action) {
-      return NextResponse.json(
-        { error: "Incorrect request: 'action' is required" },
-        { status: 400 }
-      );
-    }
+      capturedUser = { id: user.id, username: user.username };
+
+      const action = String(params.action || "").trim().toLowerCase();
+      if (!action) {
+        capturedAction = "ACTION_REQUIRED";
+        return NextResponse.json(
+          { error: "Incorrect request: 'action' is required" },
+          { status: 400 }
+        );
+      }
+
+      capturedAction = action;
 
     // 2. Route by Action
     switch (action) {
@@ -517,5 +533,37 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "Internal Server Error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+};
+
+  const response = await executePost();
+  const status = response.status;
+  const isSuccess = status >= 200 && status < 400;
+
+  (async () => {
+    try {
+      let responseBody: any = null;
+      try {
+        responseBody = await response.clone().json();
+      } catch {}
+
+      traceSmmApi({
+        action: (capturedAction || "UNKNOWN").toUpperCase(),
+        status: isSuccess ? "SUCCESS" : "FAILED",
+        status_code: status,
+        user_id: capturedUser?.id || null,
+        username: capturedUser?.username || null,
+        ip,
+        user_agent: userAgent,
+        endpoint: "/api/v1",
+        method: "POST",
+        request_payload: capturedParams,
+        response_payload: responseBody,
+        error_message: !isSuccess ? (responseBody?.error || "Error") : null,
+        latency_ms: Date.now() - startTime,
+      });
+    } catch {}
+  })().catch(() => {});
+
+  return response;
 }
 

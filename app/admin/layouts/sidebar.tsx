@@ -29,6 +29,7 @@ import {
   Store,
   ArrowDownToLine,
   FileText,
+  ScrollText,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -174,6 +175,11 @@ const MENU_SECTIONS = [
         name: "Pengaturan",
         href: "/admin/setting",
         icon: Settings,
+      },
+      {
+        name: "Log Trace",
+        href: "/admin/log",
+        icon: ScrollText,
       },
     ],
   },

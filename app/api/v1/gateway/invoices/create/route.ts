@@ -7,8 +7,13 @@ import {
   DEFAULT_SUPPORTED_COINS,
 } from "@/lib/merchant-gateway";
 import crypto from "crypto";
+import { traceMerchantApi, extractClientIp } from "@/lib/trace-logger";
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+  const ip = extractClientIp(req);
+  const userAgent = req.headers.get("user-agent");
+
   try {
     const apiKey =
       req.headers.get("x-api-key") ||
@@ -16,6 +21,18 @@ export async function POST(req: NextRequest) {
     const secretKey = req.headers.get("x-secret-key");
 
     if (!apiKey) {
+      traceMerchantApi({
+        action: "INVOICE_CREATE",
+        status: "FAILED",
+        status_code: 401,
+        ip,
+        user_agent: userAgent,
+        endpoint: "/api/v1/gateway/invoices/create",
+        method: "POST",
+        error_message: "Missing API Key header",
+        latency_ms: Date.now() - startTime,
+      });
+
       return NextResponse.json(
         { success: false, message: "Missing API Key header (x-api-key or Authorization Bearer)" },
         { status: 401 }
@@ -135,6 +152,21 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    traceMerchantApi({
+      action: "INVOICE_CREATE",
+      status: "SUCCESS",
+      status_code: 200,
+      user_id: website.merchant.userId,
+      username: website.merchant.name,
+      ip,
+      user_agent: userAgent,
+      endpoint: "/api/v1/gateway/invoices/create",
+      method: "POST",
+      request_payload: body,
+      response_payload: { invoice_id: tx.uuid, order_id: tx.orderId, amount_usd: Number(tx.amountUsd) },
+      latency_ms: Date.now() - startTime,
+    });
+
     return NextResponse.json({
       success: true,
       data: {
@@ -154,6 +186,18 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("Gateway invoice creation error:", error);
+    traceMerchantApi({
+      action: "INVOICE_CREATE",
+      status: "FAILED",
+      status_code: 500,
+      ip,
+      user_agent: userAgent,
+      endpoint: "/api/v1/gateway/invoices/create",
+      method: "POST",
+      error_message: error?.message || "Internal server error",
+      latency_ms: Date.now() - startTime,
+    });
+
     return NextResponse.json(
       { success: false, message: error?.message || "Internal server error" },
       { status: 500 }
