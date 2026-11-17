@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, Loader2, AlertCircle } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function CreateUserPage() {
   const router = useRouter();
@@ -75,12 +76,12 @@ export default function CreateUserPage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/user");
       toast.setFlash(
         "Pengguna Berhasil Ditambahkan",
         `Akun pengguna "${username.trim()}" telah berhasil didaftarkan.`
       );
       router.push("/admin/user");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

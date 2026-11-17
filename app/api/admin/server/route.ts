@@ -10,7 +10,7 @@ import {
   updateActiveClusterInEnv,
   KNOWN_REGION_METADATA,
 } from "@/lib/server-db";
-import { getCachedData, invalidateCacheTag, getCacheHeaders } from "@/lib/server-cache";
+import { getCachedData, invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 
 function maskUri(uri: string | null): string {
   if (!uri) return "mongodb+srv://(not configured)";
@@ -279,7 +279,7 @@ export async function GET() {
           servers: allServers,
         };
       },
-      { ttlSeconds: 10, tags: ["servers"] }
+      { ttlSeconds: 5, tags: ["servers"] }
     );
 
     return NextResponse.json(
@@ -287,7 +287,7 @@ export async function GET() {
         success: true,
         data: serverPayload,
       },
-      { headers: getCacheHeaders(5, 10) }
+      { headers: getNoCacheHeaders() }
     );
   } catch (error) {
     console.error("GET /api/admin/server error:", error);

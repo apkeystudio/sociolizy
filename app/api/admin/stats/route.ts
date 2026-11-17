@@ -1,6 +1,6 @@
 import { NextResponse, connection } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCachedData, getCacheHeaders, invalidateCacheKey } from "@/lib/server-cache";
+import { getCachedData, getNoCacheHeaders, invalidateCacheKey } from "@/lib/server-cache";
 import { getAllOrdersAcrossAllServers } from "@/lib/mongodb";
 import { getAllTicketsAdmin } from "@/lib/ticket-db";
 
@@ -377,7 +377,7 @@ export async function GET(request: Request) {
           lastUpdated: new Date().toISOString(),
         };
       },
-      { ttlSeconds: 15, tags: ["stats"] }
+      { ttlSeconds: 5, tags: ["stats"] }
     );
 
     return NextResponse.json(
@@ -385,7 +385,7 @@ export async function GET(request: Request) {
         success: true,
         data: statsData,
       },
-      { headers: getCacheHeaders(5, 15) }
+      { headers: getNoCacheHeaders() }
     );
   } catch (error) {
     console.error("GET /api/admin/stats error:", error);

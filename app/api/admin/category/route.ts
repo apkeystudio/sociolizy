@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCachedData, invalidateCacheTag, getCacheHeaders } from "@/lib/server-cache";
+import { getCachedData, invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 
 export async function GET() {
   try {
@@ -17,7 +17,7 @@ export async function GET() {
           orderBy: { id: "desc" },
         });
       },
-      { ttlSeconds: 60, tags: ["categories"] }
+      { ttlSeconds: 5, tags: ["categories"] }
     );
 
     return NextResponse.json(
@@ -25,7 +25,7 @@ export async function GET() {
         success: true,
         data: categories,
       },
-      { headers: getCacheHeaders(30, 60) }
+      { headers: getNoCacheHeaders() }
     );
   } catch (error) {
     console.error("GET /api/admin/category error:", error);
@@ -54,9 +54,18 @@ export async function POST(request: Request) {
     }
 
     const platformId = Number(id_platform);
-    const platformExists = await prisma.platform.findUnique({
-      where: { id: platformId },
-    });
+    const cleanSlug = slug && slug.trim()
+      ? slug.trim().toLowerCase().replace(/\s+/g, "-")
+      : name.trim().toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+
+    const [platformExists, existingSlug] = await Promise.all([
+      prisma.platform.findUnique({
+        where: { id: platformId },
+      }),
+      prisma.category.findUnique({
+        where: { slug: cleanSlug },
+      }),
+    ]);
 
     if (!platformExists) {
       return NextResponse.json(
@@ -64,14 +73,6 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
-
-    const cleanSlug = slug && slug.trim()
-      ? slug.trim().toLowerCase().replace(/\s+/g, "-")
-      : name.trim().toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
-
-    const existingSlug = await prisma.category.findUnique({
-      where: { slug: cleanSlug },
-    });
 
     if (existingSlug) {
       return NextResponse.json(

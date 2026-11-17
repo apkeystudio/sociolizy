@@ -22,7 +22,7 @@ export async function GET() {
         regions: [
           {
             code: "AUTO",
-            name: "⚡ Otomatis (Rotasi Beban Server Terbaik)",
+            name: "⚡ Automatic (Best Server Load Balancing)",
             flag: "🌐",
             serversCount: allConfigured.length,
           },

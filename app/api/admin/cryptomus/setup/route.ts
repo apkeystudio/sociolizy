@@ -1,6 +1,6 @@
 import { NextResponse, connection } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCachedData, invalidateCacheTag, getCacheHeaders } from "@/lib/server-cache";
+import { getCachedData, invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 import { Prisma } from "@/app/generated/prisma/client";
 
 export async function GET() {
@@ -35,7 +35,7 @@ export async function GET() {
         }
         return rec;
       },
-      { ttlSeconds: 60, tags: ["cryptomus_setting"] }
+      { ttlSeconds: 5, tags: ["cryptomus_setting"] }
     );
 
     return NextResponse.json(
@@ -43,7 +43,7 @@ export async function GET() {
         success: true,
         data: setting,
       },
-      { headers: getCacheHeaders(30, 60) }
+      { headers: getNoCacheHeaders() }
     );
   } catch (error) {
     console.error("GET /api/admin/cryptomus/setup error:", error);

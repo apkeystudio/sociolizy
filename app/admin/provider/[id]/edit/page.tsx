@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Save, Loader2, AlertCircle } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function EditProviderPage() {
   const router = useRouter();
@@ -80,12 +81,12 @@ export default function EditProviderPage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/provider");
       toast.setFlash(
         "Provider Berhasil Diperbarui",
         `Data provider "${name.trim()}" telah berhasil diperbarui.`
       );
       router.push("/admin/provider");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

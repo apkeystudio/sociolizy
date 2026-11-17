@@ -141,7 +141,10 @@ export default function DataDetailPage() {
         if (search.trim()) params.append("search", search.trim());
         if (selectedCategory !== "all") params.append("id_category", selectedCategory);
 
-        const res = await fetch(`/api/admin/data-detail?${params.toString()}`);
+        const res = await fetch(`/api/admin/data-detail?${params.toString()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+        });
         const json = await res.json();
 
         if (json.success) {

@@ -59,7 +59,7 @@ export default function AdminUserPage() {
     refresh: fetchUsers,
     mutate,
   } = useCachedFetch<UserItem[]>("/api/admin/user", {
-    ttlMs: 45_000,
+    ttlMs: 5_000,
     onSuccess: (data: any) => {
       if (data && data.regions) {
         setRegions(data.regions);

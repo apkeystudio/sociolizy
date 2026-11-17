@@ -61,7 +61,7 @@ export function useCachedFetch<T>(
   url: string | null,
   options: UseCachedFetchOptions<T> = {}
 ) {
-  const { ttlMs = 60_000, enabled = true, onSuccess, onError } = options;
+  const { ttlMs = 15_000, enabled = true, onSuccess, onError } = options;
 
   // Check if we have cached data right at hook initialization
   const cachedData = url ? clientCache.get<T>(url, ttlMs) : null;
@@ -98,12 +98,19 @@ export function useCachedFetch<T>(
       // If forcing refresh or no cache, show appropriate loader
       if (forceRefresh) {
         setIsRefreshing(true);
+        clientCache.invalidate(url);
       } else if (!currentCached) {
         setIsLoading(true);
       }
 
       try {
-        const res = await fetch(url);
+        const res = await fetch(url, {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+          },
+        });
         const json = await res.json();
 
         if (!isMountedRef.current) return;

@@ -18,6 +18,7 @@ import {
   Key,
 } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function EditUserPage() {
   const router = useRouter();
@@ -160,12 +161,12 @@ export default function EditUserPage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/user");
       toast.setFlash(
         "Pengguna Berhasil Diperbarui",
         `Perubahan data pengguna "${username.trim()}" berhasil disimpan.`
       );
       router.push("/admin/user");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

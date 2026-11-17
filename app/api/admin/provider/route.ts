@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCachedData, invalidateCacheTag, getCacheHeaders } from "@/lib/server-cache";
+import { getCachedData, invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 
 export async function GET() {
   try {
@@ -11,7 +11,7 @@ export async function GET() {
           orderBy: { id: "desc" },
         });
       },
-      { ttlSeconds: 60, tags: ["providers"] }
+      { ttlSeconds: 5, tags: ["providers"] }
     );
 
     return NextResponse.json(
@@ -19,7 +19,7 @@ export async function GET() {
         success: true,
         data: providers,
       },
-      { headers: getCacheHeaders(30, 60) }
+      { headers: getNoCacheHeaders() }
     );
   } catch (error) {
     console.error("GET /api/admin/provider error:", error);

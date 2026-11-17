@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, Loader2, AlertCircle } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function CreatePlatformPage() {
   const router = useRouter();
@@ -41,12 +42,12 @@ export default function CreatePlatformPage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/platform");
       toast.setFlash(
         "Platform Berhasil Dibuat",
         `Platform "${name.trim()}" telah berhasil ditambahkan.`
       );
       router.push("/admin/platform");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

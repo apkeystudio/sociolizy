@@ -142,7 +142,6 @@ export default function CreateServicePage() {
         `Layanan "${serviceName.trim()}" telah berhasil ditambahkan ke katalog.`
       );
       router.push("/admin/service");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { invalidateCacheTag } from "@/lib/server-cache";
+import { invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 
 export async function GET(request: Request) {
   try {
@@ -49,16 +49,19 @@ export async function GET(request: Request) {
       }),
     ]);
 
-    return NextResponse.json({
-      success: true,
-      data: dataDetails,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit) || 1,
+    return NextResponse.json(
+      {
+        success: true,
+        data: dataDetails,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
       },
-    });
+      { headers: getNoCacheHeaders() }
+    );
   } catch (error) {
     console.error("GET /api/admin/data-detail error:", error);
     const message = error instanceof Error ? error.message : "Gagal mengambil data detail";

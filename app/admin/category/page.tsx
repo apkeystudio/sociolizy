@@ -27,7 +27,7 @@ export default function AdminCategoryPage() {
     isRefreshing,
     refresh: fetchCategories,
     mutate,
-  } = useCachedFetch<any[]>("/api/admin/category", { ttlMs: 60_000 });
+  } = useCachedFetch<any[]>("/api/admin/category", { ttlMs: 5_000 });
 
   const categories = useMemo(() => categoriesData || [], [categoriesData]);
   const [search, setSearch] = useState("");

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, Loader2, AlertCircle } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function CreateProviderPage() {
   const router = useRouter();
@@ -50,12 +51,12 @@ export default function CreateProviderPage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/provider");
       toast.setFlash(
         "Provider Berhasil Didaftarkan",
         `API Provider "${name.trim()}" telah berhasil ditambahkan.`
       );
       router.push("/admin/provider");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

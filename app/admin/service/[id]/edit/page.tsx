@@ -169,7 +169,6 @@ export default function EditServicePage() {
         `Perubahan data layanan "${serviceName.trim()}" berhasil disimpan.`
       );
       router.push("/admin/service");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

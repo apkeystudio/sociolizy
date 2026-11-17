@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Save, Loader2, AlertCircle } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 export default function EditCategoryPage() {
   const router = useRouter();
@@ -81,12 +82,12 @@ export default function EditCategoryPage() {
         return;
       }
 
+      clientCache.invalidate("/api/admin/category");
       toast.setFlash(
         "Kategori Berhasil Diperbarui",
         `Perubahan data kategori "${name.trim()}" berhasil disimpan.`
       );
       router.push("/admin/category");
-      router.refresh();
     } catch (err) {
       console.error(err);
       setError("Terjadi kesalahan jaringan.");

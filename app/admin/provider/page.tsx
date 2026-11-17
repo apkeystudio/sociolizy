@@ -28,7 +28,7 @@ export default function AdminProviderPage() {
     isRefreshing,
     refresh: fetchProviders,
     mutate,
-  } = useCachedFetch<any[]>("/api/admin/provider", { ttlMs: 60_000 });
+  } = useCachedFetch<any[]>("/api/admin/provider", { ttlMs: 5_000 });
 
   const providers = useMemo(() => providersData || [], [providersData]);
   const [search, setSearch] = useState("");

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, Loader2, AlertCircle, FileText } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
+import { clientCache } from "@/lib/client-cache";
 
 interface CategoryOption {
   id: number;
@@ -73,6 +74,7 @@ export default function CreateDataDetailPage() {
       const json = await res.json();
 
       if (json.success) {
+        clientCache.invalidate("/api/admin/data-detail");
         toast.success("Success", "Data detail created successfully.");
         router.push("/admin/data-detail");
       } else {

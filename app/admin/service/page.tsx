@@ -140,7 +140,7 @@ export default function AdminServicePage() {
             )
             : []
         );
-        fetchServices(true);
+        fetchServices();
       } else {
         toast.error("Gagal Generate AI", json.message || "Gagal menghasilkan deskripsi.");
       }
@@ -183,7 +183,7 @@ export default function AdminServicePage() {
           );
         }
         setSelectedIds(new Set());
-        fetchServices(true);
+        fetchServices();
       } else {
         toast.error("Gagal Bulk Generate", json.message || "Gagal menghasilkan deskripsi.");
       }
@@ -294,7 +294,7 @@ export default function AdminServicePage() {
                 : []
             );
           }
-          fetchServices(true);
+          fetchServices();
         }
       } else {
         setGenerateAllModal((prev) => ({

@@ -1,8 +1,10 @@
 import { PrismaClient } from "@/app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  pgPool: Pool | undefined;
 };
 
 /**
@@ -24,7 +26,11 @@ function normalizeConnectionString(rawUrl?: string): string | undefined {
   }
 }
 
-const createPrismaClient = () => {
+const getOrCreatePool = (): Pool => {
+  if (globalForPrisma.pgPool) {
+    return globalForPrisma.pgPool;
+  }
+
   const rawConnectionString = process.env.DATABASE_URL;
   if (!rawConnectionString) {
     throw new Error("DATABASE_URL is not defined in environment variables");
@@ -32,19 +38,29 @@ const createPrismaClient = () => {
 
   const connectionString = normalizeConnectionString(rawConnectionString);
 
-  const adapter = new PrismaPg({
+  // Configure high-performance persistent connection pooling with TCP keep-alive
+  const pool = new Pool({
     connectionString,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+    keepAlive: true,
   });
 
+  globalForPrisma.pgPool = pool;
+  return pool;
+};
+
+const createPrismaClient = () => {
+  const pool = getOrCreatePool();
+  const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
 };
 
-// Reuse Prisma client across hot-reloads to prevent connection exhaustion
+// Reuse Prisma client and connection pool globally to prevent TLS handshake lag and connection exhaustion
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 export const db = prisma;
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
+globalForPrisma.prisma = prisma;
 
 export default prisma;

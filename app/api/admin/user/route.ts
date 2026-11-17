@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getDiscoveredRegions } from "@/lib/server-db";
 import { allocateRollingServerNode } from "@/lib/mongodb";
-import { getCachedData, invalidateCacheTag, getCacheHeaders } from "@/lib/server-cache";
+import { getCachedData, invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 
 export async function GET() {
   try {
@@ -35,7 +35,7 @@ export async function GET() {
 
         return { users, regions };
       },
-      { ttlSeconds: 45, tags: ["users"] }
+      { ttlSeconds: 5, tags: ["users"] }
     );
 
     return NextResponse.json(
@@ -44,7 +44,7 @@ export async function GET() {
         data: payload.users,
         regions: payload.regions,
       },
-      { headers: getCacheHeaders(20, 45) }
+      { headers: getNoCacheHeaders() }
     );
   } catch (error) {
     console.error("GET /api/admin/user error:", error);

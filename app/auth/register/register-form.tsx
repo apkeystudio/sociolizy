@@ -46,7 +46,7 @@ export default function RegisterForm() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [serverArea, setServerArea] = useState("AUTO");
   const [regions, setRegions] = useState<ServerRegionOption[]>([
-    { code: "AUTO", name: "⚡ Otomatis (Rotasi Beban Server Terbaik)", flag: "🌐" },
+    { code: "AUTO", name: "⚡ Automatic (Best Server Load Balancing)", flag: "🌐" },
     { code: "SG", name: "Singapore", flag: "🇸🇬" },
     { code: "DC", name: "United States (Washington DC)", flag: "🇺🇸" },
   ]);
@@ -259,7 +259,7 @@ export default function RegisterForm() {
                 htmlFor="name"
                 className="block text-xs font-semibold text-slate-300 mb-1"
               >
-                Nama Lengkap / Full Name
+                Full Name
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
@@ -271,13 +271,13 @@ export default function RegisterForm() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value.replace(/[^a-zA-Z0-9\s]/g, ""))}
-                  placeholder="Masukkan nama lengkap (hanya huruf & angka)"
+                  placeholder="Enter full name (letters & numbers only)"
                   autoComplete="name"
                   className="w-full pl-10 pr-4 py-2 rounded-xl text-sm text-white placeholder-slate-500 bg-slate-900/70 border border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
                 />
               </div>
               <p className="text-[10px] text-slate-500 mt-1">
-                Hanya huruf, angka, dan spasi (tanpa email atau karakter khusus).
+                Letters, numbers, and spaces only (no email or special characters).
               </p>
             </div>
 
@@ -299,13 +299,13 @@ export default function RegisterForm() {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))}
-                  placeholder="Pilih username (contoh: johndoe)"
+                  placeholder="Choose a username (e.g. johndoe)"
                   autoComplete="username"
                   className="w-full pl-10 pr-4 py-2 rounded-xl text-sm text-white placeholder-slate-500 bg-slate-900/70 border border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
                 />
               </div>
               <p className="text-[10px] text-slate-500 mt-1">
-                Hanya huruf, angka, dan underscore (_) (tanpa email atau spasi).
+                Letters, numbers, and underscore (_) only (no email or spaces).
               </p>
             </div>
 
@@ -464,12 +464,12 @@ export default function RegisterForm() {
                   className="w-full pl-10 pr-9 py-2 rounded-xl text-sm text-white bg-slate-900/70 border border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all cursor-pointer appearance-none"
                 >
                   <option value="AUTO" className="bg-slate-900 text-white font-medium">
-                    ⚡ Otomatis (Rotasi Beban Server Terbaik - Rekomendasi)
+                    ⚡ Automatic (Best Server Load Balancing - Recommended)
                   </option>
                   
                   {/* Region Groups */}
                   {regions.filter(r => r.code !== "AUTO").length > 0 && (
-                    <optgroup label="Rotasi Berdasarkan Region" className="bg-slate-900 text-slate-300 font-semibold">
+                    <optgroup label="Region Cluster Rotation" className="bg-slate-900 text-slate-300 font-semibold">
                       {regions
                         .filter(r => r.code !== "AUTO")
                         .map((reg) => (
@@ -482,7 +482,7 @@ export default function RegisterForm() {
 
                   {/* Individual Active Nodes */}
                   {servers.length > 0 && (
-                    <optgroup label="Node Server Spesifik" className="bg-slate-900 text-slate-300 font-semibold">
+                    <optgroup label="Specific Server Node" className="bg-slate-900 text-slate-300 font-semibold">
                       {servers.map((srv) => (
                         <option key={`srv-${srv.id}`} value={srv.id} className="bg-white text-slate-900 py-1.5">
                           {srv.flag} {srv.name}
@@ -501,17 +501,17 @@ export default function RegisterForm() {
                 {serverArea === "AUTO" ? (
                   <p className="text-[11px] text-emerald-400/90 leading-tight flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span><strong>Rotasi Otomatis Aktif</strong>: Akun baru otomatis didistribusikan bergantian ke server aktif dengan beban paling ringan.</span>
+                    <span><strong>Auto-Rolling Active</strong>: New accounts are automatically distributed in a balanced rotation across the least-loaded active server nodes.</span>
                   </p>
                 ) : serverArea.includes("_") ? (
                   <p className="text-[11px] text-cyan-400/90 leading-tight flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-                    <span>Node spesifik <strong>{serverArea}</strong> dipilih untuk akun ini.</span>
+                    <span>Specific server node <strong>{serverArea}</strong> selected for this account.</span>
                   </p>
                 ) : (
                   <p className="text-[11px] text-indigo-400/90 leading-tight flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                    <span>Akun akan dirotasi di antara semua node aktif di cluster region <strong>{serverArea}</strong>.</span>
+                    <span>Account will be automatically rotated among active nodes in the <strong>{serverArea}</strong> cluster region.</span>
                   </p>
                 )}
               </div>

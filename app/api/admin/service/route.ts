@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCachedData, invalidateCacheTag, getCacheHeaders } from "@/lib/server-cache";
+import { getCachedData, invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 
 export async function GET() {
   try {
@@ -35,9 +35,7 @@ export async function GET() {
         data: services,
       },
       {
-        headers: {
-          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-        },
+        headers: getNoCacheHeaders(),
       }
     );
   } catch (error) {
@@ -71,9 +69,19 @@ export async function POST(request: Request) {
     }
 
     const categoryId = Number(id_category);
-    const categoryExists = await prisma.category.findUnique({
-      where: { id: categoryId },
-    });
+    const cleanSlug = slug && slug.trim()
+      ? slug.trim().toLowerCase().replace(/\s+/g, "-")
+      : service_name.trim().toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+
+    // Run category and slug existence checks in parallel to cut round-trip latency in half
+    const [categoryExists, existingSlug] = await Promise.all([
+      prisma.category.findUnique({
+        where: { id: categoryId },
+      }),
+      prisma.service.findUnique({
+        where: { slug: cleanSlug },
+      }),
+    ]);
 
     if (!categoryExists) {
       return NextResponse.json(
@@ -81,14 +89,6 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
-
-    const cleanSlug = slug && slug.trim()
-      ? slug.trim().toLowerCase().replace(/\s+/g, "-")
-      : service_name.trim().toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
-
-    const existingSlug = await prisma.service.findUnique({
-      where: { slug: cleanSlug },
-    });
 
     if (existingSlug) {
       return NextResponse.json(

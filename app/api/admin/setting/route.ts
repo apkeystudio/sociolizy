@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCachedData, invalidateCacheTag, getCacheHeaders } from "@/lib/server-cache";
+import { getCachedData, invalidateCacheTag, getNoCacheHeaders } from "@/lib/server-cache";
 
 export async function GET() {
   try {
@@ -24,7 +24,7 @@ export async function GET() {
         }
         return rec;
       },
-      { ttlSeconds: 120, tags: ["settings"] }
+      { ttlSeconds: 5, tags: ["settings"] }
     );
 
     return NextResponse.json(
@@ -32,7 +32,7 @@ export async function GET() {
         success: true,
         data: setting,
       },
-      { headers: getCacheHeaders(60, 120) }
+      { headers: getNoCacheHeaders() }
     );
   } catch (error) {
     console.error("GET /api/admin/setting error:", error);

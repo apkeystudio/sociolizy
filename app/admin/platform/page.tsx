@@ -27,7 +27,7 @@ export default function AdminPlatformPage() {
     isRefreshing,
     refresh: fetchPlatforms,
     mutate,
-  } = useCachedFetch<any[]>("/api/admin/platform", { ttlMs: 60_000 });
+  } = useCachedFetch<any[]>("/api/admin/platform", { ttlMs: 5_000 });
 
   const platforms = useMemo(() => platformsData || [], [platformsData]);
   const [search, setSearch] = useState("");

@@ -17,10 +17,9 @@ const globalForCache = globalThis as unknown as {
 const cache = globalForCache.__serverCache ?? new Map<string, CacheEntry<any>>();
 const tagMap = globalForCache.__tagMap ?? new Map<string, Set<string>>();
 
-if (process.env.NODE_ENV !== "production") {
-  globalForCache.__serverCache = cache;
-  globalForCache.__tagMap = tagMap;
-}
+// Always persist singletons on globalThis so all API route modules share cache & invalidation
+globalForCache.__serverCache = cache;
+globalForCache.__tagMap = tagMap;
 
 /**
  * Get data from cache or execute fetcher and store result
@@ -113,6 +112,18 @@ export function clearAllServerCache(): void {
 export function getCacheHeaders(maxAgeSeconds = 30, swrSeconds = 60) {
   return {
     "Cache-Control": `public, s-maxage=${maxAgeSeconds}, stale-while-revalidate=${swrSeconds}`,
+  };
+}
+
+/**
+ * Standard HTTP No-Cache headers for Admin APIs and dynamic mutation endpoints
+ * Prevents browser & proxy from returning stale cached data
+ */
+export function getNoCacheHeaders() {
+  return {
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
   };
 }
 
