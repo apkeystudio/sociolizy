@@ -2,13 +2,16 @@ import crypto from "crypto";
 import { updateOrderInAllServers, OrderSmmDocument } from "@/lib/mongodb";
 
 export interface WebhookOrderPayload {
-  event: "order.created" | "order.updated" | "order.completed" | "order.canceled" | "order.partial";
+  event: "order.created" | "order.updated" | "order.completed" | "order.canceled" | "order.partial" | "ping";
   order: number | string;
+  order_id?: string | number | null;
   invoice: string;
   service_id: string;
   status: string;
+  order_status?: string;
   charge: string;
   start_count: number;
+  start?: number;
   remains: number;
   currency: string;
   target?: string;
@@ -31,19 +34,28 @@ export async function dispatchOrderWebhook(
   apiKey?: string | null,
   event: WebhookOrderPayload["event"] = "order.updated"
 ): Promise<DispatchResult> {
-  const callbackUrl = order.callback_url;
-  if (!callbackUrl || !callbackUrl.startsWith("http")) {
+  let callbackUrl = (order.callback_url || "").trim();
+  if (!callbackUrl) {
     return { success: false, error: "No valid callback URL provided for this order" };
   }
+  if (!callbackUrl.startsWith("http://") && !callbackUrl.startsWith("https://")) {
+    callbackUrl = `https://${callbackUrl}`;
+  }
+
+  const rawStatus = order.status || "Pending";
+  const lowerStatus = rawStatus.toLowerCase();
 
   const payload: WebhookOrderPayload = {
     event,
     order: order.id,
+    order_id: order.order_id || order.id,
     invoice: order.invoice,
-    service_id: order.service_id,
-    status: (order.status || "pending").toLowerCase(),
+    service_id: String(order.service_id),
+    status: lowerStatus,
+    order_status: rawStatus,
     charge: Number(order.price_sale || 0).toFixed(4),
     start_count: order.start ?? 0,
+    start: order.start ?? 0,
     remains: order.remains ?? 0,
     currency: "USD",
     target: order.target,
@@ -74,16 +86,27 @@ export async function dispatchOrderWebhook(
       headers,
       body: bodyString,
       signal: controller.signal,
+      redirect: "follow",
     });
 
     const durationMs = Date.now() - startTime;
     const isSuccess = response.ok;
+    let responseSnippet = "";
+    try {
+      const text = await response.text();
+      if (text) {
+        responseSnippet = text.trim().slice(0, 100);
+      }
+    } catch {}
 
-    // Record delivery status back into the order document
+    const statusRecord = isSuccess ? "sent" : `failed_${response.status}`;
+
+    // Record delivery status and effective callback_url back into the order document
     updateOrderInAllServers(
       order.invoice,
       {
-        callback_status: isSuccess ? "sent" : `failed_${response.status}`,
+        callback_url: callbackUrl,
+        callback_status: statusRecord,
       },
       order.server_area || undefined
     ).catch(() => {});
@@ -92,7 +115,9 @@ export async function dispatchOrderWebhook(
       success: isSuccess,
       statusCode: response.status,
       durationMs,
-      error: isSuccess ? undefined : `Target server responded with HTTP ${response.status}`,
+      error: isSuccess
+        ? undefined
+        : `Target server responded with HTTP ${response.status}${responseSnippet ? `: ${responseSnippet}` : ""}`,
     };
   } catch (error: any) {
     const durationMs = Date.now() - startTime;
@@ -101,6 +126,7 @@ export async function dispatchOrderWebhook(
     updateOrderInAllServers(
       order.invoice,
       {
+        callback_url: callbackUrl,
         callback_status: "failed_timeout",
       },
       order.server_area || undefined

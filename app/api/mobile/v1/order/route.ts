@@ -242,6 +242,7 @@ export async function POST(request: Request) {
         start: 0,
         refill: Boolean(refill),
         status: orderStatus,
+        callback_url: user.callback_url || null,
       },
       userRegion
     );

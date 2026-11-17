@@ -9,6 +9,7 @@ import {
   Loader2,
   PlusCircle,
   X,
+  RotateCcw,
 } from "lucide-react";
 import MemberTablePagination from "@/app/member/components/table-pagination";
 
@@ -22,6 +23,7 @@ interface OrderHistoryItem {
   target: string;
   status: string;
   server_area?: string;
+  refill?: boolean;
   create_at: string;
 }
 
@@ -214,19 +216,20 @@ export default function MemberOrderHistoryPage() {
                   <th className="py-3 px-3.5 text-right">Price ($)</th>
                   <th className="py-3 px-3.5 text-center">Status</th>
                   <th className="py-3 px-3.5 text-right">Date</th>
+                  <th className="py-3 px-3.5 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-slate-400">
+                    <td colSpan={9} className="py-16 text-center text-slate-400">
                       <Loader2 className="w-5 h-5 animate-spin mx-auto text-emerald-600 mb-2" />
                       <span className="text-xs">Loading order records...</span>
                     </td>
                   </tr>
                 ) : filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-14 text-center text-slate-400 text-xs sm:text-sm">
+                    <td colSpan={9} className="py-14 text-center text-slate-400 text-xs sm:text-sm">
                       <p className="font-semibold text-slate-700 mb-1">
                         {isFiltered ? "No Matching Orders Found" : "No Orders Placed Yet"}
                       </p>
@@ -247,56 +250,82 @@ export default function MemberOrderHistoryPage() {
                     </td>
                   </tr>
                 ) : (
-                  paginatedOrders.map((ord) => (
-                    <tr key={ord.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-2.5 px-3.5 font-mono font-bold text-emerald-700">
-                        {ord.invoice}
-                      </td>
-                      <td className="py-2.5 px-3.5">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 font-mono border border-slate-200">
-                          {ord.server_area || "SG"}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3.5 font-mono text-slate-600 text-xs">
-                        {ord.order_id || "-"}
-                      </td>
-                      <td className="py-2.5 px-3.5 max-w-[220px] truncate text-slate-800" title={ord.target}>
-                        {ord.target}
-                      </td>
-                      <td className="py-2.5 px-3.5 text-right font-mono text-slate-900 font-semibold">
-                        {ord.amount.toLocaleString()}
-                      </td>
-                      <td className="py-2.5 px-3.5 text-right font-mono text-emerald-600 font-semibold">
-                        ${Number(ord.price_sale).toFixed(4)}
-                      </td>
-                      <td className="py-2.5 px-3.5 text-center">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            ord.status === "Processing" || ord.status === "In progress"
-                              ? "bg-sky-50 text-sky-700 border-sky-200"
-                              : ord.status === "Completed"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : ord.status === "Partial"
-                              ? "bg-amber-50 text-amber-700 border-amber-200"
-                              : ord.status === "Canceled" || ord.status === "Error"
-                              ? "bg-rose-50 text-rose-700 border-rose-200"
-                              : "bg-slate-50 text-slate-600 border-slate-200"
-                          }`}
-                        >
-                          {ord.status}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3.5 text-right text-slate-500 whitespace-nowrap text-[11px]">
-                        {new Date(ord.create_at).toLocaleDateString("en-US", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                    </tr>
-                  ))
+                  paginatedOrders.map((ord) => {
+                    const isRefillEligible =
+                      ord.refill ||
+                      (ord.status !== "Canceled" && ord.status !== "Error" && Boolean(ord.order_id));
+
+                    return (
+                      <tr key={ord.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-2.5 px-3.5 font-mono font-bold text-emerald-700">
+                          {ord.invoice}
+                        </td>
+                        <td className="py-2.5 px-3.5">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 font-mono border border-slate-200">
+                            {ord.server_area || "SG"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3.5 font-mono text-slate-600 text-xs">
+                          {ord.order_id || "-"}
+                        </td>
+                        <td className="py-2.5 px-3.5 max-w-[220px] truncate text-slate-800" title={ord.target}>
+                          {ord.target}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-right font-mono text-slate-900 font-semibold">
+                          {ord.amount.toLocaleString()}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-right font-mono text-emerald-600 font-semibold">
+                          ${Number(ord.price_sale).toFixed(4)}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                              ord.status === "Processing" || ord.status === "In progress"
+                                ? "bg-sky-50 text-sky-700 border-sky-200"
+                                : ord.status === "Completed"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : ord.status === "Partial"
+                                ? "bg-amber-50 text-amber-700 border-amber-200"
+                                : ord.status === "Canceled" || ord.status === "Error"
+                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                : "bg-slate-50 text-slate-600 border-slate-200"
+                            }`}
+                          >
+                            {ord.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3.5 text-right text-slate-500 whitespace-nowrap text-[11px]">
+                          {new Date(ord.create_at).toLocaleDateString("en-US", {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-center">
+                          {isRefillEligible ? (
+                            <Link
+                              href={`/member/refill?order_id=${encodeURIComponent(
+                                ord.order_id || ord.id
+                              )}&invoice=${encodeURIComponent(ord.invoice)}&service_id=${encodeURIComponent(
+                                ord.service_id
+                              )}&target=${encodeURIComponent(ord.target)}&amount=${encodeURIComponent(
+                                ord.amount
+                              )}`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 border border-emerald-200 transition-colors shadow-2xs"
+                              title="Request Refill for this order"
+                            >
+                              <RotateCcw className="w-3 h-3 text-emerald-600" />
+                              <span>Refill</span>
+                            </Link>
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

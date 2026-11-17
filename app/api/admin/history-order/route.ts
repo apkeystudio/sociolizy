@@ -6,6 +6,7 @@ import {
   getAllOrdersAcrossAllServers,
   updateOrderInAllServers,
   getOrderByInvoiceAcrossServers,
+  OrderSmmDocument,
 } from "@/lib/mongodb";
 import {
   checkOrderStatusFromProvider,
@@ -93,6 +94,8 @@ export async function GET(request: Request) {
               email: true,
               level: true,
               server_area: true,
+              callback_url: true,
+              api_key: true,
             },
           })
         : [],
@@ -139,6 +142,9 @@ export async function GET(request: Request) {
 
       return {
         ...ord,
+        callback_url: ord.callback_url || user?.callback_url || null,
+        callback_status: ord.callback_status || (ord.callback_url || user?.callback_url ? "pending" : null),
+        user_callback_url: user?.callback_url || null,
         user_username: user?.username || "Unknown",
         user_email: user?.email || null,
         user_level: user?.level || null,
@@ -197,7 +203,73 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { invoice, invoices, server_area } = body;
+    const { action, invoice, invoices, server_area, callback_url } = body;
+
+    // Action: Direct test/dispatch callback from admin
+    if (action === "test_callback" || action === "resend_callback") {
+      if (!invoice) {
+        return NextResponse.json(
+          { success: false, message: "Nomor Invoice pesanan wajib disertakan." },
+          { status: 400 }
+        );
+      }
+
+      const found = await getOrderByInvoiceAcrossServers(invoice.trim(), server_area);
+      if (!found) {
+        return NextResponse.json(
+          { success: false, message: "Pesanan tidak ditemukan di klaster database MongoDB." },
+          { status: 404 }
+        );
+      }
+
+      const { order, serverNode } = found;
+
+      let userRecord: { id: number; username: string; callback_url: string | null; api_key: string | null } | null = null;
+      if (order.uuid_user) {
+        try {
+          userRecord = await prisma.user.findUnique({
+            where: { uuid: order.uuid_user },
+            select: { id: true, username: true, callback_url: true, api_key: true },
+          });
+        } catch (uErr) {
+          console.warn("[Admin Callback Test] Failed to lookup user:", uErr);
+        }
+      }
+
+      const targetUrl =
+        (callback_url && typeof callback_url === "string" ? callback_url.trim() : null) ||
+        (order.callback_url && order.callback_url.trim() ? order.callback_url.trim() : null) ||
+        (userRecord?.callback_url && userRecord.callback_url.trim() ? userRecord.callback_url.trim() : null);
+
+      if (!targetUrl) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Tidak ada URL Callback pada pesanan ini maupun pada profil pengguna.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { dispatchOrderWebhook } = await import("@/lib/webhook-dispatcher");
+      const orderForWebhook: OrderSmmDocument = {
+        ...order,
+        callback_url: targetUrl,
+      };
+
+      const result = await dispatchOrderWebhook(orderForWebhook, userRecord?.api_key || null, "order.updated");
+
+      return NextResponse.json({
+        success: result.success,
+        statusCode: result.statusCode,
+        durationMs: result.durationMs,
+        error: result.error,
+        message: result.success
+          ? `Callback berhasil dikirim (HTTP ${result.statusCode}) ke ${targetUrl} dalam ${result.durationMs}ms`
+          : `Gagal mengirim callback ke ${targetUrl}: ${result.error || `HTTP ${result.statusCode}`}`,
+        callback_url: targetUrl,
+      });
+    }
 
     // Support single invoice or list of invoices
     const targetInvoices: string[] = [];
@@ -363,21 +435,34 @@ export async function POST(request: Request) {
       }
 
       // Automated Webhook / Callback trigger to client endpoint
-      if (order.callback_url) {
+      let targetUserForCb: { callback_url: string | null; api_key: string | null } | null = null;
+      if (order.uuid_user) {
+        try {
+          targetUserForCb = await prisma.user.findUnique({
+            where: { uuid: order.uuid_user },
+            select: { callback_url: true, api_key: true },
+          });
+        } catch {}
+      }
+
+      const effectiveCbUrl = order.callback_url || targetUserForCb?.callback_url || null;
+
+      if (effectiveCbUrl) {
         try {
           const { dispatchOrderWebhook } = await import("@/lib/webhook-dispatcher");
-          dispatchOrderWebhook(
+          await dispatchOrderWebhook(
             {
               ...order,
+              callback_url: effectiveCbUrl,
               status: normalizedStatus,
               remains,
               start: startCount,
             },
-            null,
+            targetUserForCb?.api_key || null,
             "order.updated"
-          ).catch((wErr) => console.warn("[Webhook] Delivery error:", wErr));
+          );
         } catch (wErr) {
-          console.warn("[Webhook] Failed to dispatch order callback:", wErr);
+          console.warn("[Webhook] Failed to dispatch order callback on sync:", wErr);
         }
       }
 
@@ -454,7 +539,7 @@ export async function PATCH(request: Request) {
     }
 
     const body = await request.json();
-    const { invoice, status, remains, start, server_area } = body;
+    const { invoice, status, remains, start, server_area, callback_url, send_callback } = body;
 
     if (!invoice) {
       return NextResponse.json(
@@ -474,6 +559,32 @@ export async function PATCH(request: Request) {
 
     const { order, serverNode } = found;
 
+    // Fetch user details for default callback_url and api_key (for HMAC signature)
+    let userRecord: { id: number; username: string; callback_url: string | null; api_key: string | null } | null = null;
+    if (order.uuid_user) {
+      try {
+        userRecord = await prisma.user.findUnique({
+          where: { uuid: order.uuid_user },
+          select: { id: true, username: true, callback_url: true, api_key: true },
+        });
+      } catch (uErr) {
+        console.warn("[Admin PATCH Order] Failed to fetch user for callback:", uErr);
+      }
+    }
+
+    // Determine effective callback URL:
+    // 1) Explicit callback_url provided by admin in the edit form
+    // 2) Stored callback_url in MongoDB order document
+    // 3) Default callback_url configured on User profile in PostgreSQL
+    let effectiveCallbackUrl: string | null = null;
+    if (callback_url !== undefined && typeof callback_url === "string") {
+      effectiveCallbackUrl = callback_url.trim() || null;
+    } else if (order.callback_url && order.callback_url.trim()) {
+      effectiveCallbackUrl = order.callback_url.trim();
+    } else if (userRecord?.callback_url && userRecord.callback_url.trim()) {
+      effectiveCallbackUrl = userRecord.callback_url.trim();
+    }
+
     const updates: any = {};
     const newStatus = status ? String(status).trim() : order.status;
     const normStatus = normalizeOrderStatus(newStatus);
@@ -483,6 +594,7 @@ export async function PATCH(request: Request) {
     updates.status = normStatus;
     if (remains !== undefined) updates.remains = newRemains;
     if (start !== undefined) updates.start = newStart;
+    if (effectiveCallbackUrl) updates.callback_url = effectiveCallbackUrl;
 
     // 2. Calculate Refund
     const refundCalc = calculateOrderRefund(order, normStatus, newRemains);
@@ -547,32 +659,54 @@ export async function PATCH(request: Request) {
     }
 
     // Automated Webhook / Callback trigger to client endpoint
-    if (order.callback_url) {
+    let callbackNotice = "";
+    let callbackResult: any = null;
+
+    const shouldDispatch =
+      send_callback !== false && Boolean(effectiveCallbackUrl && effectiveCallbackUrl.startsWith("http"));
+
+    if (shouldDispatch && effectiveCallbackUrl) {
       try {
         const { dispatchOrderWebhook } = await import("@/lib/webhook-dispatcher");
-        dispatchOrderWebhook(
-          {
-            ...order,
-            status: normStatus,
-            remains: newRemains,
-            start: newStart,
-          },
-          null,
+        const orderForWebhook: OrderSmmDocument = {
+          ...order,
+          ...updates,
+          callback_url: effectiveCallbackUrl,
+          status: normStatus,
+          remains: newRemains,
+          start: newStart,
+        };
+
+        const res = await dispatchOrderWebhook(
+          orderForWebhook,
+          userRecord?.api_key || null,
           "order.updated"
-        ).catch((wErr) => console.warn("[Webhook] Delivery error:", wErr));
-      } catch (wErr) {
+        );
+
+        callbackResult = res;
+        if (res.success) {
+          callbackNotice = ` Callback webhook terkirim (HTTP ${res.statusCode}) ke ${effectiveCallbackUrl}.`;
+        } else {
+          callbackNotice = ` Callback ke ${effectiveCallbackUrl} gagal: ${res.error || `HTTP ${res.statusCode}`}.`;
+        }
+      } catch (wErr: any) {
         console.warn("[Webhook] Failed to dispatch order callback:", wErr);
+        callbackNotice = ` Callback gagal dikirim: ${wErr?.message || "Delivery error"}.`;
       }
+    } else if (!effectiveCallbackUrl && send_callback !== false) {
+      callbackNotice = " (Tidak ada URL Callback pada pesanan maupun akun pengguna).";
     }
 
     return NextResponse.json({
       success: true,
-      message: `Status pesanan ${invoice} berhasil diperbarui ke "${normStatus}".${refundMessage}`,
+      message: `Status pesanan ${invoice} berhasil diperbarui ke "${normStatus}".${refundMessage}${callbackNotice}`,
       data: {
         invoice,
         status: normStatus,
         remains: newRemains,
         start: newStart,
+        callback_url: effectiveCallbackUrl,
+        callback_result: callbackResult,
         refund: refundCalc,
       },
     });

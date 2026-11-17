@@ -35,6 +35,7 @@ import {
   ArrowRight,
   Zap,
   RotateCcw,
+  Radio,
 } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
 
@@ -53,6 +54,9 @@ interface EnrichedOrder {
   start: number;
   refill: boolean;
   status: string;
+  callback_url?: string | null;
+  callback_status?: string | null;
+  user_callback_url?: string | null;
   server_area?: string | null;
   refund_amount?: number;
   refunded?: boolean;
@@ -114,6 +118,9 @@ export default function AdminHistoryOrderPage() {
   const [editStatus, setEditStatus] = useState("");
   const [editRemains, setEditRemains] = useState<number | string>("");
   const [editStart, setEditStart] = useState<number | string>("");
+  const [editCallbackUrl, setEditCallbackUrl] = useState("");
+  const [sendCallbackOnSave, setSendCallbackOnSave] = useState(true);
+  const [isTestingCallback, setIsTestingCallback] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
   // Copied state tracker
@@ -208,7 +215,44 @@ export default function AdminHistoryOrderPage() {
     setEditStatus(order.status);
     setEditRemains(order.remains);
     setEditStart(order.start);
+    const cb = order.callback_url || order.user_callback_url || "";
+    setEditCallbackUrl(cb);
+    setSendCallbackOnSave(Boolean(cb));
     setIsEditModalOpen(true);
+  };
+
+  const handleTestCallback = async () => {
+    if (!selectedOrder) return;
+    const urlToTest = editCallbackUrl.trim();
+    if (!urlToTest) {
+      toast.error("URL Callback Kosong", "Masukkan URL Callback webhook terlebih dahulu.");
+      return;
+    }
+
+    setIsTestingCallback(true);
+    try {
+      const res = await fetch("/api/admin/history-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "test_callback",
+          invoice: selectedOrder.invoice,
+          callback_url: urlToTest,
+          server_area: selectedOrder.server_area,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Gagal mengirim test callback.");
+      }
+
+      toast.success("Callback Berhasil", json.message);
+    } catch (err) {
+      toast.error("Callback Gagal", err instanceof Error ? err.message : "Gagal terhubung ke endpoint");
+    } finally {
+      setIsTestingCallback(false);
+    }
   };
 
   const handleSaveOrderUpdate = async (e: React.FormEvent) => {
@@ -226,6 +270,8 @@ export default function AdminHistoryOrderPage() {
           remains: Number(editRemains),
           start: Number(editStart),
           server_area: selectedOrder.server_area,
+          callback_url: editCallbackUrl.trim() || null,
+          send_callback: sendCallbackOnSave,
         }),
       });
 
@@ -770,6 +816,28 @@ export default function AdminHistoryOrderPage() {
                           <span>Refund ${Number(ord.refund_amount).toFixed(4)}</span>
                         </span>
                       )}
+                      {(ord.callback_url || ord.user_callback_url) && (
+                        <span
+                          className={`inline-flex items-center gap-1 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md mt-1 block w-fit ${
+                            ord.callback_status === "sent"
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : ord.callback_status?.startsWith("failed")
+                              ? "bg-rose-50 text-rose-700 border border-rose-200"
+                              : "bg-slate-100 text-slate-600 border border-slate-200"
+                          }`}
+                          title={`Callback URL: ${ord.callback_url || ord.user_callback_url}`}
+                        >
+                          <Radio className="w-2.5 h-2.5" />
+                          <span>
+                            CB:{" "}
+                            {ord.callback_status === "sent"
+                              ? "Terkirim"
+                              : ord.callback_status?.startsWith("failed")
+                              ? "Gagal"
+                              : "Tersedia"}
+                          </span>
+                        </span>
+                      )}
                     </td>
 
                     {/* Waktu */}
@@ -1042,6 +1110,34 @@ export default function AdminHistoryOrderPage() {
                   </span>
                 </div>
               )}
+
+              {/* Box 7: URL Callback Webhook */}
+              {(selectedOrder.callback_url || selectedOrder.user_callback_url) && (
+                <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/80 space-y-2 sm:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>URL Callback (IPN Webhook)</span>
+                    </span>
+                    {selectedOrder.callback_status && (
+                      <span
+                        className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                          selectedOrder.callback_status === "sent"
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                            : selectedOrder.callback_status.startsWith("failed")
+                            ? "bg-rose-100 text-rose-800 border border-rose-200"
+                            : "bg-slate-200 text-slate-700"
+                        }`}
+                      >
+                        Status: {selectedOrder.callback_status}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-3 rounded-xl bg-white border border-slate-200 text-slate-800 font-mono text-xs break-all">
+                    {selectedOrder.callback_url || selectedOrder.user_callback_url}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Modal Actions */}
@@ -1175,6 +1271,70 @@ export default function AdminHistoryOrderPage() {
                     onChange={(e) => setEditRemains(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-slate-50 border border-slate-200 text-slate-800 font-medium focus:bg-white focus:border-emerald-500 focus:outline-none transition-all"
                   />
+                </div>
+              </div>
+
+              {/* Webhook Callback Settings */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <Radio className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>URL Callback (IPN Webhook)</span>
+                  </label>
+                  {selectedOrder.callback_status && (
+                    <span
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                        selectedOrder.callback_status === "sent"
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                          : selectedOrder.callback_status.startsWith("failed")
+                          ? "bg-rose-100 text-rose-800 border border-rose-200"
+                          : "bg-slate-200 text-slate-700"
+                      }`}
+                    >
+                      Status: {selectedOrder.callback_status}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={editCallbackUrl}
+                    onChange={(e) => setEditCallbackUrl(e.target.value)}
+                    placeholder="https://domain-klien.com/api/callback"
+                    className="flex-1 px-3 py-2 rounded-xl text-xs bg-white border border-slate-200 text-slate-800 font-mono focus:border-emerald-500 focus:outline-none transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTestCallback}
+                    disabled={isTestingCallback || !editCallbackUrl.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
+                    title="Uji coba pengiriman webhook sekarang"
+                  >
+                    {isTestingCallback ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    )}
+                    <span>Test</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between pt-0.5">
+                  <label className="inline-flex items-center gap-2 text-[11px] text-slate-600 font-medium cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sendCallbackOnSave}
+                      onChange={(e) => setSendCallbackOnSave(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span>Kirim Callback Webhook otomatis saat status disimpan</span>
+                  </label>
+                  {selectedOrder.user_callback_url && !selectedOrder.callback_url && (
+                    <span className="text-[10px] text-emerald-600 font-mono">
+                      (Terdeteksi dari profil @{selectedOrder.user_username})
+                    </span>
+                  )}
                 </div>
               </div>
 

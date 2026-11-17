@@ -23,6 +23,7 @@ export interface MobileUserAuthResult extends MobileAuthResult {
     level: string;
     server_area: string;
     api_key: string | null;
+    callback_url?: string | null;
     create_at: Date;
   };
   session?: UserSession;
@@ -162,6 +163,7 @@ export async function authenticateMobileUser(request: Request): Promise<MobileUs
       level: true,
       server_area: true,
       api_key: true,
+      callback_url: true,
       create_at: true,
       mobile_session_version: true,
     },

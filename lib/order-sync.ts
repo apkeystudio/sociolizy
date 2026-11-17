@@ -274,6 +274,31 @@ export async function syncActiveOrdersFromProviders(
           await pusherServer.trigger("admin-orders", "order-status-updated", payload);
         } catch {}
 
+        // Automated Webhook / Callback trigger to client endpoint
+        try {
+          let userRecordForCb: { callback_url: string | null; api_key: string | null } | null = null;
+          if (order.uuid_user) {
+            userRecordForCb = await prisma.user.findUnique({
+              where: { uuid: order.uuid_user },
+              select: { callback_url: true, api_key: true },
+            });
+          }
+
+          const effectiveCbUrl = order.callback_url || userRecordForCb?.callback_url || null;
+          if (effectiveCbUrl) {
+            const { dispatchOrderWebhook } = await import("@/lib/webhook-dispatcher");
+            dispatchOrderWebhook(
+              {
+                ...order,
+                ...updateData,
+                callback_url: effectiveCbUrl,
+              },
+              userRecordForCb?.api_key || null,
+              "order.updated"
+            ).catch(() => {});
+          }
+        } catch {}
+
         details.push({
           invoice: order.invoice,
           orderId: order.order_id,

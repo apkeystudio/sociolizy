@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { Receipt, ShoppingCart, ArrowRight } from "lucide-react";
+import { Receipt, ShoppingCart, ArrowRight, RotateCcw } from "lucide-react";
 
 export default function MemberHistoryIndexPage() {
   return (
@@ -11,7 +11,7 @@ export default function MemberHistoryIndexPage() {
         </h1>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-1">
         {/* Card 1: Order History */}
         <Link
           href="/member/history/order"
@@ -54,6 +54,29 @@ export default function MemberHistoryIndexPage() {
 
           <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-100 text-xs sm:text-sm font-semibold text-emerald-600 group-hover:text-emerald-700">
             <span>View Deposit History</span>
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+          </div>
+        </Link>
+
+        {/* Card 3: Refill History */}
+        <Link
+          href="/member/history/refill"
+          className="group p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 hover:border-emerald-500/40 hover:shadow-xs transition-all flex flex-col justify-between shadow-xs"
+        >
+          <div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 mb-3.5 group-hover:scale-105 transition-transform">
+              <RotateCcw className="w-5 h-5 text-emerald-600" />
+            </div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">
+              Refill History
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 mt-1.5 leading-relaxed">
+              Track refill request IDs, check live provider replenishment progress, and monitor warranty status.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-100 text-xs sm:text-sm font-semibold text-emerald-600 group-hover:text-emerald-700">
+            <span>View Refill History</span>
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </div>
         </Link>

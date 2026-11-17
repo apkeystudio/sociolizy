@@ -103,6 +103,7 @@ const nextConfig: NextConfig = {
     ];
   },
   experimental: {
+    agentUpgrade: "security",
     agentFeedback: true,
     serverActions: {
       allowedOrigins: ["*.ngrok-free.app", "*.ngrok.app", "localhost:3000"],

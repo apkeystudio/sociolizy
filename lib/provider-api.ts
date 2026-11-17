@@ -499,4 +499,290 @@ export function calculateOrderRefund(
   };
 }
 
+export interface SubmitRefillParams {
+  url: string;
+  apiKey: string;
+  orderId: string | number;
+}
+
+export interface ProviderRefillResult {
+  success: boolean;
+  refillId?: string | number;
+  error?: string;
+  rawResponse?: any;
+}
+
+/**
+ * Submits a refill request to an SMM Provider API.
+ * Uses FormData (multipart/form-data) with fallback to application/x-www-form-urlencoded.
+ * Sends: key, action: 'refill', order: '$order_id'
+ * Expected response: { "refill": "1" } or { "error": "..." }
+ */
+export async function submitRefillToProvider(
+  params: SubmitRefillParams
+): Promise<ProviderRefillResult> {
+  const { url, apiKey, orderId } = params;
+
+  if (!url || !apiKey || orderId === undefined || orderId === null || String(orderId).trim() === "") {
+    return {
+      success: false,
+      error: "Provider URL, API Key, or Order ID is missing.",
+    };
+  }
+
+  const cleanUrl = url.trim();
+  const cleanKey = apiKey.trim();
+  const cleanOrderId = String(orderId).trim();
+
+  // 1. Try multipart/form-data
+  try {
+    const formData = new FormData();
+    formData.append("key", cleanKey);
+    formData.append("action", "refill");
+    formData.append("order", cleanOrderId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+    const response = await fetch(cleanUrl, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Master-SMM-Engine/1.0",
+      },
+    });
+    clearTimeout(timeoutId);
+
+    const text = await response.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // not JSON
+    }
+
+    if (json) {
+      if (json.refill !== undefined && json.refill !== null) {
+        return {
+          success: true,
+          refillId: json.refill,
+          rawResponse: json,
+        };
+      }
+      if (json.error) {
+        return {
+          success: false,
+          error: typeof json.error === "string" ? json.error : JSON.stringify(json.error),
+          rawResponse: json,
+        };
+      }
+    }
+  } catch (err: any) {
+    // proceed to fallback
+  }
+
+  // 2. Fallback to application/x-www-form-urlencoded
+  try {
+    const urlParams = new URLSearchParams();
+    urlParams.append("key", cleanKey);
+    urlParams.append("action", "refill");
+    urlParams.append("order", cleanOrderId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+    const response = await fetch(cleanUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Master-SMM-Engine/1.0",
+      },
+      body: urlParams.toString(),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const text = await response.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // not JSON
+    }
+
+    if (json) {
+      if (json.refill !== undefined && json.refill !== null) {
+        return {
+          success: true,
+          refillId: json.refill,
+          rawResponse: json,
+        };
+      }
+      if (json.error) {
+        return {
+          success: false,
+          error: typeof json.error === "string" ? json.error : JSON.stringify(json.error),
+          rawResponse: json,
+        };
+      }
+    }
+
+    return {
+      success: false,
+      error: text ? `Invalid provider response: ${text.slice(0, 150)}` : "Empty response from provider.",
+      rawResponse: text,
+    };
+  } catch (fallbackErr: any) {
+    return {
+      success: false,
+      error: fallbackErr?.message || "Failed to connect to provider server.",
+    };
+  }
+}
+
+export interface CheckRefillStatusParams {
+  url: string;
+  apiKey: string;
+  refillId: string | number;
+}
+
+export interface ProviderRefillStatusResult {
+  success: boolean;
+  status?: string;
+  error?: string;
+  rawResponse?: any;
+}
+
+/**
+ * Checks refill status from an SMM Provider API.
+ * Uses FormData (multipart/form-data) with fallback to application/x-www-form-urlencoded.
+ * Sends: key, action: 'refill_status', order: '$refill_id' (and 'refill': '$refill_id')
+ * Expected response: { "status": "Completed" } or { "error": "..." }
+ */
+export async function checkRefillStatusFromProvider(
+  params: CheckRefillStatusParams
+): Promise<ProviderRefillStatusResult> {
+  const { url, apiKey, refillId } = params;
+
+  if (!url || !apiKey || refillId === undefined || refillId === null || String(refillId).trim() === "") {
+    return {
+      success: false,
+      error: "Provider URL, API Key, or Refill ID is missing.",
+    };
+  }
+
+  const cleanUrl = url.trim();
+  const cleanKey = apiKey.trim();
+  const cleanRefillId = String(refillId).trim();
+
+  // 1. Try multipart/form-data
+  try {
+    const formData = new FormData();
+    formData.append("key", cleanKey);
+    formData.append("action", "refill_status");
+    formData.append("order", cleanRefillId);
+    formData.append("refill", cleanRefillId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    const response = await fetch(cleanUrl, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Master-SMM-Engine/1.0",
+      },
+    });
+    clearTimeout(timeoutId);
+
+    const text = await response.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // not JSON
+    }
+
+    if (json) {
+      if (json.status !== undefined && json.status !== null) {
+        return {
+          success: true,
+          status: String(json.status),
+          rawResponse: json,
+        };
+      }
+      if (json.error) {
+        return {
+          success: false,
+          error: typeof json.error === "string" ? json.error : JSON.stringify(json.error),
+          rawResponse: json,
+        };
+      }
+    }
+  } catch {
+    // proceed to fallback
+  }
+
+  // 2. Fallback to application/x-www-form-urlencoded
+  try {
+    const urlParams = new URLSearchParams();
+    urlParams.append("key", cleanKey);
+    urlParams.append("action", "refill_status");
+    urlParams.append("order", cleanRefillId);
+    urlParams.append("refill", cleanRefillId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    const response = await fetch(cleanUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Master-SMM-Engine/1.0",
+      },
+      body: urlParams.toString(),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const text = await response.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // not JSON
+    }
+
+    if (json) {
+      if (json.status !== undefined && json.status !== null) {
+        return {
+          success: true,
+          status: String(json.status),
+          rawResponse: json,
+        };
+      }
+      if (json.error) {
+        return {
+          success: false,
+          error: typeof json.error === "string" ? json.error : JSON.stringify(json.error),
+          rawResponse: json,
+        };
+      }
+    }
+
+    return {
+      success: false,
+      error: text ? `Invalid provider response: ${text.slice(0, 150)}` : "Empty response from provider.",
+      rawResponse: text,
+    };
+  } catch (fallbackErr: any) {
+    return {
+      success: false,
+      error: fallbackErr?.message || "Failed to connect to provider server.",
+    };
+  }
+}
+
 

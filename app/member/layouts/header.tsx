@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Code2,
   Store,
+  RotateCcw,
 } from "lucide-react";
 import { MemberUserData } from "./topbar";
 import MemberNotificationsDropdown from "../components/member-notifications-dropdown";
@@ -73,6 +74,12 @@ export default function MemberHeader({ user }: MemberHeaderProps) {
       exact: false,
     },
     {
+      name: "Refill",
+      href: "/member/refill",
+      icon: RotateCcw,
+      exact: false,
+    },
+    {
       name: "Deposit",
       href: "/member/payment",
       icon: Wallet,
@@ -104,6 +111,12 @@ export default function MemberHeader({ user }: MemberHeaderProps) {
       href: "/member/history/deposit",
       icon: Receipt,
       desc: "Invoices & balance top-up logs",
+    },
+    {
+      name: "Refill History",
+      href: "/member/history/refill",
+      icon: RotateCcw,
+      desc: "Track refill requests & guarantee logs",
     },
   ];
 

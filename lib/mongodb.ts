@@ -999,3 +999,223 @@ export const saveOrderToMongo = async (
     return false;
   }
 };
+
+/**
+ * =============================================================================
+ * REFILL SMM MONGO MODEL & OPERATIONS
+ * =============================================================================
+ */
+
+export interface RefillSmmDocument {
+  id: number;
+  refill_id: string;
+  invoice: string;
+  order_id: string;
+  service_id: string;
+  service_name?: string;
+  target: string;
+  amount: number;
+  uuid_user: string;
+  uuid_api_provider: string | null;
+  status: string; // "Pending", "In progress", "Completed", "Rejected", "Error"
+  response_msg?: string | null;
+  server_area?: string | null;
+  create_at: Date;
+  update_at: Date;
+}
+
+function mapRefillDocs(docs: any[], defaultArea: string): RefillSmmDocument[] {
+  return docs.map((doc: any) => ({
+    id: doc.id,
+    refill_id: String(doc.refill_id ?? ""),
+    invoice: String(doc.invoice ?? ""),
+    order_id: String(doc.order_id ?? ""),
+    service_id: String(doc.service_id ?? ""),
+    service_name: doc.service_name || undefined,
+    target: String(doc.target ?? ""),
+    amount: Number(doc.amount || 0),
+    uuid_user: String(doc.uuid_user ?? ""),
+    uuid_api_provider: doc.uuid_api_provider ? String(doc.uuid_api_provider) : null,
+    status: String(doc.status || "Pending"),
+    response_msg: doc.response_msg || null,
+    server_area: doc.server_area || defaultArea,
+    create_at: doc.create_at ? new Date(doc.create_at) : new Date(),
+    update_at: doc.update_at ? new Date(doc.update_at) : new Date(),
+  }));
+}
+
+export async function getRefillSmmCollection(
+  serverArea?: string,
+  userIdentifier?: string
+): Promise<Collection<RefillSmmDocument> | null> {
+  const db = await getMongoDb(serverArea, userIdentifier);
+  if (!db) return null;
+
+  const collection = db.collection<RefillSmmDocument>("refill_smm");
+  collection.createIndex({ id: 1 }, { unique: true, background: true }).catch(() => {});
+  collection.createIndex({ refill_id: 1 }, { background: true }).catch(() => {});
+  collection.createIndex({ uuid_user: 1 }, { background: true }).catch(() => {});
+  collection.createIndex({ order_id: 1 }, { background: true }).catch(() => {});
+  collection.createIndex({ invoice: 1 }, { background: true }).catch(() => {});
+  return collection;
+}
+
+export async function createRefillInMongo(
+  data: Partial<RefillSmmDocument> & {
+    uuid_user: string;
+    order_id: string;
+    invoice: string;
+  },
+  serverArea?: string
+): Promise<RefillSmmDocument> {
+  const targetNode = serverArea || "SG";
+  const col = await getRefillSmmCollection(targetNode, data.uuid_user);
+  if (!col) {
+    throw new Error(`[MongoDB] Cannot connect to refill collection for area "${targetNode}"`);
+  }
+
+  const nextId = data.id ?? (await getNextSequence("refill_smm", serverArea, data.uuid_user));
+  const doc: RefillSmmDocument = {
+    id: nextId,
+    refill_id: String(data.refill_id || nextId),
+    invoice: data.invoice,
+    order_id: String(data.order_id),
+    service_id: String(data.service_id || ""),
+    service_name: data.service_name || undefined,
+    target: data.target || "",
+    amount: Number(data.amount || 0),
+    uuid_user: data.uuid_user,
+    uuid_api_provider: data.uuid_api_provider ?? null,
+    status: data.status || "Pending",
+    response_msg: data.response_msg || null,
+    server_area: targetNode,
+    create_at: data.create_at || new Date(),
+    update_at: data.update_at || new Date(),
+  };
+
+  await col.insertOne(doc as any);
+  return doc;
+}
+
+export async function getRefillsFromMongo(
+  uuid_user?: string,
+  limit: number = 50,
+  serverArea?: string
+): Promise<RefillSmmDocument[]> {
+  try {
+    const regionServers = getServersForRegion(serverArea);
+
+    if (regionServers.length <= 1) {
+      const col = await getRefillSmmCollection(serverArea, uuid_user);
+      if (!col) return [];
+      const filter = uuid_user ? { uuid_user } : {};
+      const docs = await col.find(filter).sort({ create_at: -1, id: -1 }).limit(limit).toArray();
+      return mapRefillDocs(docs, serverArea || "SG");
+    }
+
+    const queryPromises = regionServers.map(async (srv) => {
+      try {
+        const client = await getMongoClient(srv.id);
+        if (!client) return [];
+        const col = client.db("master_smm").collection<RefillSmmDocument>("refill_smm");
+        const filter = uuid_user ? { uuid_user } : {};
+        const docs = await col.find(filter).sort({ create_at: -1, id: -1 }).limit(limit).toArray();
+        return mapRefillDocs(docs, srv.id);
+      } catch {
+        return [];
+      }
+    });
+
+    const results = await Promise.allSettled(queryPromises);
+    const combined: RefillSmmDocument[] = [];
+    const seenIds = new Set<string>();
+
+    for (const res of results) {
+      if (res.status === "fulfilled" && Array.isArray(res.value)) {
+        for (const item of res.value) {
+          const key = `${item.invoice}_${item.refill_id}`;
+          if (!seenIds.has(key)) {
+            seenIds.add(key);
+            combined.push(item);
+          }
+        }
+      }
+    }
+
+    combined.sort((a, b) => new Date(b.create_at).getTime() - new Date(a.create_at).getTime());
+    return combined.slice(0, limit);
+  } catch (error) {
+    console.error(`[MongoDB] Failed to query refills from region ${serverArea}:`, error);
+    return [];
+  }
+}
+
+export async function findRefillInMongo(
+  refillIdentifier: string | number,
+  serverArea?: string
+): Promise<RefillSmmDocument | null> {
+  const regionServers = getServersForRegion(serverArea);
+  const numericId = Number(refillIdentifier);
+  const isNum = !isNaN(numericId);
+
+  const filter: any = {
+    $or: [
+      { refill_id: String(refillIdentifier) },
+      ...(isNum ? [{ id: numericId }] : []),
+    ],
+  };
+
+  for (const srv of regionServers) {
+    try {
+      const client = await getMongoClient(srv.id);
+      if (!client) continue;
+      const col = client.db("master_smm").collection<RefillSmmDocument>("refill_smm");
+      const doc = await col.findOne(filter);
+      if (doc) {
+        return mapRefillDocs([doc], srv.id)[0];
+      }
+    } catch (err) {
+      console.warn(`[MongoDB] Find refill error on node ${srv.id}:`, err);
+    }
+  }
+  return null;
+}
+
+export async function updateRefillStatusInMongo(
+  refillIdentifier: string | number,
+  newStatus: string,
+  serverArea?: string
+): Promise<boolean> {
+  const regionServers = getServersForRegion(serverArea);
+  const numericId = Number(refillIdentifier);
+  const isNum = !isNaN(numericId);
+
+  const filter: any = {
+    $or: [
+      { refill_id: String(refillIdentifier) },
+      ...(isNum ? [{ id: numericId }] : []),
+    ],
+  };
+
+  let updated = false;
+  for (const srv of regionServers) {
+    try {
+      const client = await getMongoClient(srv.id);
+      if (!client) continue;
+      const col = client.db("master_smm").collection<RefillSmmDocument>("refill_smm");
+      const res = await col.updateOne(filter, {
+        $set: {
+          status: newStatus,
+          update_at: new Date(),
+        },
+      });
+      if (res.matchedCount > 0) {
+        updated = true;
+        break;
+      }
+    } catch (err) {
+      console.warn(`[MongoDB] Update refill error on node ${srv.id}:`, err);
+    }
+  }
+  return updated;
+}
