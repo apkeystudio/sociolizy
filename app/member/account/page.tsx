@@ -20,6 +20,13 @@ import {
   Server,
   Calendar,
   Sparkles,
+  Webhook,
+  Send,
+  Radio,
+  Code,
+  ChevronDown,
+  ChevronUp,
+  Trash2,
 } from "lucide-react";
 
 interface AccountData {
@@ -31,9 +38,26 @@ interface AccountData {
   balance: number;
   level: string;
   api_key: string;
+  callback_url?: string | null;
   server_area: string;
   created_at: string;
 }
+
+const sampleWebhookJson = `{
+  "event": "order.updated",
+  "order": 10529,
+  "order_id": "893421",
+  "invoice": "INV-20261118-84920",
+  "service_id": "142",
+  "status": "completed",
+  "order_status": "Completed",
+  "charge": "1.2500",
+  "start_count": 1250,
+  "remains": 0,
+  "currency": "USD",
+  "target": "https://instagram.com/p/DF92k1l",
+  "timestamp": "2026-11-19T12:00:00.000Z"
+}`;
 
 export default function MemberAccountPage() {
   const [loading, setLoading] = useState(true);
@@ -63,6 +87,17 @@ export default function MemberAccountPage() {
   const [savingCustomKey, setSavingCustomKey] = useState(false);
   const [apiKeyMessage, setApiKeyMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // Webhook / Callback State
+  const [callbackUrl, setCallbackUrl] = useState("");
+  const [savingCallback, setSavingCallback] = useState(false);
+  const [testingCallback, setTestingCallback] = useState(false);
+  const [callbackMessage, setCallbackMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [showPayloadSample, setShowPayloadSample] = useState(false);
+  const [copiedPayload, setCopiedPayload] = useState(false);
+
   // Fetch account data on mount
   useEffect(() => {
     fetchAccount();
@@ -77,11 +112,106 @@ export default function MemberAccountPage() {
         setAccount(json.data);
         setName(json.data.name || "");
         setApiKey(json.data.api_key || "");
+        setCallbackUrl(json.data.callback_url || "");
       }
     } catch (err) {
       console.error("Failed to fetch account info:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Handle Save Callback URL
+  async function handleSaveCallback(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    setCallbackMessage(null);
+    setSavingCallback(true);
+
+    try {
+      const res = await fetch("/api/member/callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callback_url: callbackUrl.trim() }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setCallbackMessage({ type: "error", text: data.message || "Failed to save Callback URL." });
+      } else {
+        setCallbackMessage({
+          type: "success",
+          text: data.message || (callbackUrl.trim() ? "Callback URL saved successfully!" : "Callback URL disabled."),
+        });
+        if (account) {
+          setAccount({ ...account, callback_url: callbackUrl.trim() });
+        }
+      }
+    } catch {
+      setCallbackMessage({ type: "error", text: "A network error occurred. Please try again." });
+    } finally {
+      setSavingCallback(false);
+    }
+  }
+
+  // Handle Send Test Webhook Ping
+  async function handleTestCallback() {
+    const trimmed = callbackUrl.trim();
+    if (!trimmed) {
+      setCallbackMessage({ type: "error", text: "Please enter a valid callback URL (http:// or https://) to test." });
+      return;
+    }
+    setCallbackMessage(null);
+    setTestingCallback(true);
+
+    try {
+      const res = await fetch("/api/member/callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "test", callback_url: trimmed }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setCallbackMessage({
+          type: "error",
+          text: data.message || data.error || "Webhook delivery test failed.",
+        });
+      } else {
+        setCallbackMessage({
+          type: "success",
+          text: data.message || `Webhook test delivered successfully! (HTTP ${data.statusCode} in ${data.durationMs}ms)`,
+        });
+      }
+    } catch {
+      setCallbackMessage({ type: "error", text: "Failed to connect to test endpoint. Check URL or firewall." });
+    } finally {
+      setTestingCallback(false);
+    }
+  }
+
+  // Handle Clear Callback URL
+  async function handleClearCallback() {
+    setCallbackUrl("");
+    setCallbackMessage(null);
+    setSavingCallback(true);
+
+    try {
+      const res = await fetch("/api/member/callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callback_url: "" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCallbackMessage({ type: "success", text: "Default callback URL has been removed." });
+        if (account) {
+          setAccount({ ...account, callback_url: "" });
+        }
+      }
+    } catch {
+      setCallbackMessage({ type: "error", text: "Failed to clear callback URL." });
+    } finally {
+      setSavingCallback(false);
     }
   }
 
@@ -521,6 +651,196 @@ export default function MemberAccountPage() {
               </div>
             </form>
           </div>
+
+          {/* Card 3: Webhook & Order Callback Settings */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 mb-5 gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                  <Webhook className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Webhook &amp; Order Callback</h2>
+                  <p className="text-xs text-slate-500">
+                    Receive automatic HTTP POST notifications whenever order status changes
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="self-start sm:self-auto">
+                {account?.callback_url ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Webhook Active</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 border border-slate-200 text-slate-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                    <span>Not Configured</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {callbackMessage && (
+              <div
+                className={`mb-5 p-3.5 rounded-xl border text-xs flex items-center gap-2.5 ${
+                  callbackMessage.type === "success"
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                    : "bg-rose-50 border-rose-200 text-rose-800"
+                }`}
+              >
+                {callbackMessage.type === "success" ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                )}
+                <span className="flex-1">{callbackMessage.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveCallback} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Default Callback URL
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                      <Radio className="w-3.5 h-3.5 text-slate-400" />
+                    </div>
+                    <input
+                      type="url"
+                      value={callbackUrl}
+                      onChange={(e) => setCallbackUrl(e.target.value)}
+                      placeholder="https://yourdomain.com/api/smm/webhook"
+                      className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 transition"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="submit"
+                      disabled={savingCallback}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs sm:text-sm transition shadow-xs disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingCallback ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Save className="w-3.5 h-3.5" />
+                      )}
+                      <span>{savingCallback ? "Saving..." : "Save URL"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleTestCallback}
+                      disabled={testingCallback || !callbackUrl.trim()}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs sm:text-sm transition shadow-xs disabled:opacity-40 cursor-pointer"
+                    >
+                      {testingCallback ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Send className="w-3.5 h-3.5" />
+                      )}
+                      <span>{testingCallback ? "Testing..." : "Send Test Ping"}</span>
+                    </button>
+
+                    {Boolean(account?.callback_url) && (
+                      <button
+                        type="button"
+                        onClick={handleClearCallback}
+                        disabled={savingCallback}
+                        className="inline-flex items-center justify-center p-2.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                        title="Remove Callback URL"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Our system sends real-time JSON payloads with HMAC-SHA256 signature signed using your API Key whenever an order is completed, partial, or canceled.
+                </p>
+              </div>
+
+              {/* Expandable Specifications & Payload Sample */}
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowPayloadSample(!showPayloadSample)}
+                  className="flex items-center justify-between w-full text-xs font-semibold text-slate-600 hover:text-emerald-700 transition cursor-pointer py-1"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Code className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Webhook Payload Example &amp; Headers</span>
+                  </span>
+                  {showPayloadSample ? (
+                    <ChevronUp className="w-4 h-4 text-slate-400" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                  )}
+                </button>
+
+                {showPayloadSample && (
+                  <div className="mt-3 space-y-3 animate-in fade-in duration-150">
+                    {/* Headers Info */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] font-mono text-slate-700 space-y-1">
+                      <div><span className="text-emerald-700 font-bold">POST</span> /your/webhook/endpoint</div>
+                      <div><span className="text-slate-400">Content-Type:</span> application/json</div>
+                      <div><span className="text-slate-400">User-Agent:</span> Master-SMM-Webhook-Engine/1.0</div>
+                      <div><span className="text-slate-400">X-SMM-Event:</span> order.updated</div>
+                      <div><span className="text-slate-400">X-SMM-Signature:</span> HMAC-SHA256(payload, apiKey)</div>
+                    </div>
+
+                    {/* JSON Payload Preview with Copy */}
+                    <div className="relative rounded-xl bg-slate-900 border border-slate-800 p-3.5 text-slate-200">
+                      <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-[10px] text-slate-400 uppercase font-bold tracking-wider">
+                        <span>Sample JSON Payload</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(sampleWebhookJson);
+                            setCopiedPayload(true);
+                            setTimeout(() => setCopiedPayload(false), 2000);
+                          }}
+                          className="inline-flex items-center gap-1 text-slate-300 hover:text-white transition cursor-pointer"
+                        >
+                          {copiedPayload ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-400 font-semibold">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copy JSON</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <pre className="text-[11px] font-mono leading-relaxed overflow-x-auto text-emerald-400/90">
+                        {sampleWebhookJson}
+                      </pre>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+                      <span>Expected response: HTTP 200 with {"{\"status\": \"ok\"}"}</span>
+                      <Link
+                        href="/documentasi#callback"
+                        className="inline-flex items-center gap-1 text-emerald-600 hover:underline font-semibold"
+                      >
+                        <span>Full Webhook Guide</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </form>
+          </div>
         </div>
 
         {/* Right Column: API Key Management & Quick Overview */}
@@ -690,6 +1010,20 @@ export default function MemberAccountPage() {
                 </span>
                 <span className="font-medium text-slate-700">
                   {account?.email ? "Verified" : "Unset"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+                <span className="text-slate-500 flex items-center gap-1.5">
+                  <Webhook className="w-3.5 h-3.5 text-slate-400" />
+                  Webhook Status
+                </span>
+                <span
+                  className={`font-semibold ${
+                    account?.callback_url ? "text-emerald-700" : "text-slate-400"
+                  }`}
+                >
+                  {account?.callback_url ? "Active" : "Unset"}
                 </span>
               </div>
 

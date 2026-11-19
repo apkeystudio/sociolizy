@@ -577,12 +577,23 @@ export async function PATCH(request: Request) {
     // 2) Stored callback_url in MongoDB order document
     // 3) Default callback_url configured on User profile in PostgreSQL
     let effectiveCallbackUrl: string | null = null;
-    if (callback_url !== undefined && typeof callback_url === "string") {
-      effectiveCallbackUrl = callback_url.trim() || null;
+    if (callback_url !== undefined) {
+      if (typeof callback_url === "string" && callback_url.trim()) {
+        effectiveCallbackUrl = callback_url.trim();
+      } else if (callback_url === null || callback_url === "") {
+        effectiveCallbackUrl = null;
+      }
     } else if (order.callback_url && order.callback_url.trim()) {
       effectiveCallbackUrl = order.callback_url.trim();
     } else if (userRecord?.callback_url && userRecord.callback_url.trim()) {
       effectiveCallbackUrl = userRecord.callback_url.trim();
+    }
+
+    // Ensure valid URL protocol
+    if (effectiveCallbackUrl) {
+      if (!effectiveCallbackUrl.startsWith("http://") && !effectiveCallbackUrl.startsWith("https://")) {
+        effectiveCallbackUrl = `https://${effectiveCallbackUrl}`;
+      }
     }
 
     const updates: any = {};
@@ -594,7 +605,24 @@ export async function PATCH(request: Request) {
     updates.status = normStatus;
     if (remains !== undefined) updates.remains = newRemains;
     if (start !== undefined) updates.start = newStart;
-    if (effectiveCallbackUrl) updates.callback_url = effectiveCallbackUrl;
+    if (effectiveCallbackUrl) {
+      updates.callback_url = effectiveCallbackUrl;
+    } else if (callback_url === null || callback_url === "") {
+      updates.callback_url = null;
+    }
+
+    // If order's user has no default callback_url in PostgreSQL, save it for future orders
+    if (effectiveCallbackUrl && order.uuid_user && !userRecord?.callback_url) {
+      try {
+        await prisma.user.update({
+          where: { uuid: order.uuid_user },
+          data: { callback_url: effectiveCallbackUrl },
+        });
+        console.log(`[Admin PATCH Order] Stored default callback_url for user ${order.uuid_user}`);
+      } catch (uErr) {
+        console.warn("[Admin PATCH Order] Failed to update user default callback_url:", uErr);
+      }
+    }
 
     // 2. Calculate Refund
     const refundCalc = calculateOrderRefund(order, normStatus, newRemains);
@@ -662,8 +690,14 @@ export async function PATCH(request: Request) {
     let callbackNotice = "";
     let callbackResult: any = null;
 
-    const shouldDispatch =
-      send_callback !== false && Boolean(effectiveCallbackUrl && effectiveCallbackUrl.startsWith("http"));
+    // Dispatch if callback URL exists and send_callback is not explicitly false
+    const shouldDispatch = Boolean(effectiveCallbackUrl) && send_callback !== false;
+
+    console.log(`[Admin PATCH Order] Callback evaluation for ${invoice}:`, {
+      effectiveCallbackUrl,
+      send_callback,
+      shouldDispatch,
+    });
 
     if (shouldDispatch && effectiveCallbackUrl) {
       try {
@@ -671,19 +705,29 @@ export async function PATCH(request: Request) {
         const orderForWebhook: OrderSmmDocument = {
           ...order,
           ...updates,
+          server_area: order.server_area || serverNode.id,
           callback_url: effectiveCallbackUrl,
           status: normStatus,
           remains: newRemains,
           start: newStart,
         };
 
+        let eventType: "order.updated" | "order.completed" | "order.canceled" | "order.partial" = "order.updated";
+        if (normStatus === "Completed") eventType = "order.completed";
+        else if (normStatus === "Canceled") eventType = "order.canceled";
+        else if (normStatus === "Partial") eventType = "order.partial";
+
+        console.log(`[Admin PATCH Order] Dispatching webhook to ${effectiveCallbackUrl} (event: ${eventType}, status: ${normStatus})`);
+
         const res = await dispatchOrderWebhook(
           orderForWebhook,
           userRecord?.api_key || null,
-          "order.updated"
+          eventType
         );
 
         callbackResult = res;
+        console.log(`[Admin PATCH Order] Webhook dispatch result for ${invoice}:`, res);
+
         if (res.success) {
           callbackNotice = ` Callback webhook terkirim (HTTP ${res.statusCode}) ke ${effectiveCallbackUrl}.`;
         } else {
@@ -695,6 +739,9 @@ export async function PATCH(request: Request) {
       }
     } else if (!effectiveCallbackUrl && send_callback !== false) {
       callbackNotice = " (Tidak ada URL Callback pada pesanan maupun akun pengguna).";
+      console.log(`[Admin PATCH Order] Webhook skipped for ${invoice}: No callback URL configured.`);
+    } else if (send_callback === false) {
+      console.log(`[Admin PATCH Order] Webhook skipped for ${invoice}: send_callback is explicitly false.`);
     }
 
     return NextResponse.json({

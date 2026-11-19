@@ -65,9 +65,12 @@ export async function dispatchOrderWebhook(
   const bodyString = JSON.stringify(payload);
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "Accept": "application/json, text/plain, */*",
     "User-Agent": "Master-SMM-Webhook-Engine/1.0",
     "X-SMM-Event": event,
     "X-SMM-Delivery": crypto.randomUUID(),
+    "ngrok-skip-browser-warning": "true",
+    "bypass-tunnel-reminder": "true",
   };
 
   // If apiKey is available, sign payload using HMAC-SHA256 for integrity verification
@@ -149,8 +152,12 @@ export async function sendTestWebhookPing(
   callbackUrl: string,
   apiKey?: string | null
 ): Promise<DispatchResult> {
-  if (!callbackUrl || !callbackUrl.startsWith("http")) {
-    return { success: false, error: "Invalid URL (must start with http:// or https://)" };
+  let targetUrl = (callbackUrl || "").trim();
+  if (!targetUrl) {
+    return { success: false, error: "Invalid URL: callback URL cannot be empty" };
+  }
+  if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+    targetUrl = `https://${targetUrl}`;
   }
 
   const payload = {
@@ -171,9 +178,12 @@ export async function sendTestWebhookPing(
   const bodyString = JSON.stringify(payload);
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "Accept": "application/json, text/plain, */*",
     "User-Agent": "Master-SMM-Webhook-Engine/1.0",
     "X-SMM-Event": "ping",
     "X-SMM-Delivery": crypto.randomUUID(),
+    "ngrok-skip-browser-warning": "true",
+    "bypass-tunnel-reminder": "true",
   };
 
   if (apiKey) {
@@ -186,7 +196,7 @@ export async function sendTestWebhookPing(
   const startTime = Date.now();
 
   try {
-    const response = await fetch(callbackUrl, {
+    const response = await fetch(targetUrl, {
       method: "POST",
       headers,
       body: bodyString,

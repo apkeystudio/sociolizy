@@ -52,6 +52,7 @@ export default function MemberRealtimeProvider({
 }) {
   const [balance, setBalance] = useState<number>(initialBalance);
   const [toasts, setToasts] = useState<MemberToast[]>([]);
+  const recentMemberToastsRef = React.useRef<Map<string, number>>(new Map());
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -59,8 +60,29 @@ export default function MemberRealtimeProvider({
 
   const showMemberToast = useCallback(
     (title: string, message: string, type: MemberToast["type"] = "info") => {
-      const id = `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-      setToasts((prev) => [...prev, { id, title, message, type }]);
+      // Deduplicate identical toasts fired within 2000ms
+      const cleanTitle = (title || "").trim().toLowerCase();
+      const cleanMsg = (message || "").trim().toLowerCase();
+      const dedupeKey = `${type}:${cleanTitle}:${cleanMsg.slice(0, 50)}`;
+      const now = Date.now();
+
+      const lastTimestamp = recentMemberToastsRef.current.get(dedupeKey);
+      if (lastTimestamp && now - lastTimestamp < 2000) {
+        return;
+      }
+      recentMemberToastsRef.current.set(dedupeKey, now);
+
+      if (recentMemberToastsRef.current.size > 100) {
+        recentMemberToastsRef.current.clear();
+      }
+
+      const id = `${now}-${Math.random().toString(36).substring(2, 6)}`;
+      setToasts((prev) => {
+        if (prev.some((t) => t.title === title && t.message === message)) {
+          return prev;
+        }
+        return [...prev, { id, title, message, type }];
+      });
 
       setTimeout(() => {
         removeToast(id);

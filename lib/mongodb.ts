@@ -914,6 +914,58 @@ export async function getAllOrdersAcrossAllServers(
 }
 
 /**
+ * Aggregates daily order counts and total volume across all cluster MongoDB servers for the last N days.
+ */
+export async function getOrdersDailyTrend(days = 7): Promise<Record<string, { count: number; totalVolume: number }>> {
+  const allServers = getDiscoveredServers().filter((s) => s.isConfigured);
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - (days - 1));
+  startDate.setHours(0, 0, 0, 0);
+
+  const result: Record<string, { count: number; totalVolume: number }> = {};
+  const seenInvoices = new Set<string>();
+
+  const promises = allServers.map(async (srv) => {
+    try {
+      const client = await getMongoClientByNode(srv);
+      if (!client) return;
+      const col = client.db("master_smm").collection<OrderSmmDocument>("order_smm");
+      const docs = await col
+        .find(
+          {
+            $or: [
+              { create_at: { $gte: startDate } },
+              { create_at: { $gte: startDate.toISOString() as any } },
+            ],
+          },
+          { projection: { invoice: 1, create_at: 1, price_sale: 1 } }
+        )
+        .toArray();
+
+      for (const d of docs) {
+        if (d.invoice && !seenInvoices.has(d.invoice)) {
+          seenInvoices.add(d.invoice);
+          const dDate = new Date(d.create_at || Date.now());
+          if (!isNaN(dDate.getTime())) {
+            const dateKey = dDate.toISOString().slice(0, 10);
+            if (!result[dateKey]) {
+              result[dateKey] = { count: 0, totalVolume: 0 };
+            }
+            result[dateKey].count += 1;
+            result[dateKey].totalVolume += Number(d.price_sale || 0);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[getOrdersDailyTrend] Error on server ${srv.id}:`, err);
+    }
+  });
+
+  await Promise.allSettled(promises);
+  return result;
+}
+
+/**
  * Retrieves a single order document by invoice across all configured MongoDB cluster servers.
  */
 export async function getOrderByInvoiceAcrossServers(
@@ -1218,4 +1270,302 @@ export async function updateRefillStatusInMongo(
     }
   }
   return updated;
+}
+
+export interface FinancialReportFilterOptions {
+  startDate: Date;
+  endDate: Date;
+  serverNode?: string;
+  status?: string;
+}
+
+export interface FinancialOrderReportItem {
+  id: number;
+  invoice: string;
+  order_id: string | null;
+  uuid_user: string;
+  uuid_api_provider: string | null;
+  service_id: string;
+  amount: number;
+  price_api: number;
+  price_sale: number;
+  profit: number;
+  marginPercent: number;
+  status: string;
+  target: string;
+  server_area: string;
+  create_at: string;
+}
+
+export interface FinancialOrdersReportResult {
+  orders: FinancialOrderReportItem[];
+  totalOrders: number;
+  totalOmset: number;
+  totalModal: number;
+  totalProfit: number;
+  profitMargin: number;
+  avgOrderValue: number;
+  avgProfitPerOrder: number;
+  statusCounts: Record<string, { count: number; omset: number; modal: number; profit: number }>;
+  dailyBreakdown: Record<
+    string,
+    {
+      date: string;
+      ordersCount: number;
+      omset: number;
+      modal: number;
+      profit: number;
+      completedCount: number;
+      canceledCount: number;
+    }
+  >;
+  serviceBreakdown: Record<
+    string,
+    {
+      service_id: string;
+      ordersCount: number;
+      omset: number;
+      modal: number;
+      profit: number;
+    }
+  >;
+  providerBreakdown: Record<
+    string,
+    {
+      providerUuid: string;
+      ordersCount: number;
+      modal: number;
+    }
+  >;
+}
+
+/**
+ * Aggregates comprehensive financial order metrics (Omzet, Modal/HPP, Laba) across all cluster MongoDB servers
+ * within a given date range [startDate, endDate].
+ */
+export async function getOrdersFinancialReportData(
+  options: FinancialReportFilterOptions
+): Promise<FinancialOrdersReportResult> {
+  const { startDate, endDate, serverNode = "ALL", status = "ALL" } = options;
+
+  const allServers = getDiscoveredServers().filter((s) => s.isConfigured);
+  const targetServers =
+    serverNode && serverNode !== "ALL"
+      ? allServers.filter((s) => s.id.toUpperCase() === serverNode.toUpperCase())
+      : allServers;
+
+  const mongoFilter: any = {
+    $or: [
+      { create_at: { $gte: startDate, $lte: endDate } },
+      { create_at: { $gte: startDate.toISOString() as any, $lte: endDate.toISOString() as any } },
+    ],
+  };
+
+  if (status && status !== "ALL") {
+    mongoFilter.status = { $regex: new RegExp(`^${status}$`, "i") };
+  }
+
+  const seenInvoices = new Set<string>();
+  const orders: FinancialOrderReportItem[] = [];
+
+  let totalOmset = 0;
+  let totalModal = 0;
+  let totalProfit = 0;
+
+  const statusCounts: Record<string, { count: number; omset: number; modal: number; profit: number }> = {
+    Completed: { count: 0, omset: 0, modal: 0, profit: 0 },
+    Processing: { count: 0, omset: 0, modal: 0, profit: 0 },
+    "In progress": { count: 0, omset: 0, modal: 0, profit: 0 },
+    Pending: { count: 0, omset: 0, modal: 0, profit: 0 },
+    Partial: { count: 0, omset: 0, modal: 0, profit: 0 },
+    Canceled: { count: 0, omset: 0, modal: 0, profit: 0 },
+  };
+
+  const dailyBreakdown: Record<
+    string,
+    {
+      date: string;
+      ordersCount: number;
+      omset: number;
+      modal: number;
+      profit: number;
+      completedCount: number;
+      canceledCount: number;
+    }
+  > = {};
+
+  const serviceBreakdown: Record<
+    string,
+    {
+      service_id: string;
+      ordersCount: number;
+      omset: number;
+      modal: number;
+      profit: number;
+    }
+  > = {};
+
+  const providerBreakdown: Record<
+    string,
+    {
+      providerUuid: string;
+      ordersCount: number;
+      modal: number;
+    }
+  > = {};
+
+  const promises = targetServers.map(async (srv) => {
+    try {
+      const client = await getMongoClientByNode(srv);
+      if (!client) return;
+      const col = client.db("master_smm").collection<OrderSmmDocument>("order_smm");
+
+      const docs = await col
+        .find(mongoFilter, {
+          projection: {
+            id: 1,
+            invoice: 1,
+            order_id: 1,
+            uuid_user: 1,
+            uuid_api_provider: 1,
+            service_id: 1,
+            amount: 1,
+            price_api: 1,
+            price_sale: 1,
+            target: 1,
+            status: 1,
+            server_area: 1,
+            create_at: 1,
+          },
+        })
+        .toArray();
+
+      for (const doc of docs) {
+        if (!doc.invoice || seenInvoices.has(doc.invoice)) continue;
+        seenInvoices.add(doc.invoice);
+
+        const pSale = Number(doc.price_sale || 0);
+        const pApi = Number(doc.price_api || 0);
+        const profit = Number((pSale - pApi).toFixed(4));
+        const marginPct = pSale > 0 ? Number(((profit / pSale) * 100).toFixed(2)) : 0;
+        const oDate = doc.create_at ? new Date(doc.create_at) : new Date();
+        const dateKey = !isNaN(oDate.getTime()) ? oDate.toISOString().slice(0, 10) : "Unknown";
+        const normStatus = doc.status || "Pending";
+
+        // Accumulate financial totals
+        totalOmset += pSale;
+        totalModal += pApi;
+        totalProfit += profit;
+
+        // Status counts
+        if (!statusCounts[normStatus]) {
+          statusCounts[normStatus] = { count: 0, omset: 0, modal: 0, profit: 0 };
+        }
+        statusCounts[normStatus].count += 1;
+        statusCounts[normStatus].omset += pSale;
+        statusCounts[normStatus].modal += pApi;
+        statusCounts[normStatus].profit += profit;
+
+        // Daily breakdown
+        if (dateKey !== "Unknown") {
+          if (!dailyBreakdown[dateKey]) {
+            dailyBreakdown[dateKey] = {
+              date: dateKey,
+              ordersCount: 0,
+              omset: 0,
+              modal: 0,
+              profit: 0,
+              completedCount: 0,
+              canceledCount: 0,
+            };
+          }
+          dailyBreakdown[dateKey].ordersCount += 1;
+          dailyBreakdown[dateKey].omset += pSale;
+          dailyBreakdown[dateKey].modal += pApi;
+          dailyBreakdown[dateKey].profit += profit;
+          if (normStatus.toLowerCase() === "completed") {
+            dailyBreakdown[dateKey].completedCount += 1;
+          } else if (normStatus.toLowerCase() === "canceled") {
+            dailyBreakdown[dateKey].canceledCount += 1;
+          }
+        }
+
+        // Service breakdown
+        const sId = String(doc.service_id || "0");
+        if (!serviceBreakdown[sId]) {
+          serviceBreakdown[sId] = {
+            service_id: sId,
+            ordersCount: 0,
+            omset: 0,
+            modal: 0,
+            profit: 0,
+          };
+        }
+        serviceBreakdown[sId].ordersCount += 1;
+        serviceBreakdown[sId].omset += pSale;
+        serviceBreakdown[sId].modal += pApi;
+        serviceBreakdown[sId].profit += profit;
+
+        // Provider breakdown
+        const pKey = doc.uuid_api_provider || "manual";
+        if (!providerBreakdown[pKey]) {
+          providerBreakdown[pKey] = {
+            providerUuid: pKey,
+            ordersCount: 0,
+            modal: 0,
+          };
+        }
+        providerBreakdown[pKey].ordersCount += 1;
+        providerBreakdown[pKey].modal += pApi;
+
+        orders.push({
+          id: doc.id,
+          invoice: doc.invoice,
+          order_id: doc.order_id || null,
+          uuid_user: doc.uuid_user,
+          uuid_api_provider: doc.uuid_api_provider || null,
+          service_id: sId,
+          amount: Number(doc.amount || 0),
+          price_api: pApi,
+          price_sale: pSale,
+          profit,
+          marginPercent: marginPct,
+          status: normStatus,
+          target: doc.target || "",
+          server_area: doc.server_area || srv.id,
+          create_at: !isNaN(oDate.getTime()) ? oDate.toISOString() : new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.warn(`[getOrdersFinancialReportData] Error on server ${srv.id}:`, err);
+    }
+  });
+
+  await Promise.allSettled(promises);
+
+  // Sort orders descending by create_at
+  orders.sort((a, b) => new Date(b.create_at).getTime() - new Date(a.create_at).getTime());
+
+  const totalOrders = orders.length;
+  const netOmset = Number(totalOmset.toFixed(4));
+  const netModal = Number(totalModal.toFixed(4));
+  const netProfit = Number(totalProfit.toFixed(4));
+  const profitMargin = netOmset > 0 ? Number(((netProfit / netOmset) * 100).toFixed(2)) : 0;
+  const avgOrderValue = totalOrders > 0 ? Number((netOmset / totalOrders).toFixed(4)) : 0;
+  const avgProfitPerOrder = totalOrders > 0 ? Number((netProfit / totalOrders).toFixed(4)) : 0;
+
+  return {
+    orders,
+    totalOrders,
+    totalOmset: netOmset,
+    totalModal: netModal,
+    totalProfit: netProfit,
+    profitMargin,
+    avgOrderValue,
+    avgProfitPerOrder,
+    statusCounts,
+    dailyBreakdown,
+    serviceBreakdown,
+    providerBreakdown,
+  };
 }

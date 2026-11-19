@@ -15,10 +15,11 @@ import {
   ArrowRight,
   RotateCcw,
   Sparkles,
-  Send,
+  Radio,
   Globe,
   AlertCircle,
   Loader2,
+  ExternalLink,
 } from "lucide-react";
 import { Topbar, Navbar, Footer } from "@/app/layouts";
 
@@ -45,15 +46,6 @@ export default function ApiDocumentationPage() {
     balance: { collapsed: false, dismissed: false },
   });
 
-  // State for callback manager
-  const [defaultCallbackUrl, setDefaultCallbackUrl] = useState("");
-  const [callbackSaving, setCallbackSaving] = useState(false);
-  const [callbackTesting, setCallbackTesting] = useState(false);
-  const [callbackMessage, setCallbackMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
-
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
@@ -68,65 +60,7 @@ export default function ApiDocumentationPage() {
         }
       })
       .catch(() => {});
-
-    // Fetch member's current callback URL if logged in
-    fetch("/api/member/callback")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.success && data?.callback_url) {
-          setDefaultCallbackUrl(data.callback_url);
-        }
-      })
-      .catch(() => {});
   }, []);
-
-  const handleSaveCallback = async () => {
-    setCallbackSaving(true);
-    setCallbackMessage(null);
-    try {
-      const res = await fetch("/api/member/callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callback_url: defaultCallbackUrl.trim() }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCallbackMessage({ type: "success", text: data.message || "Default callback URL saved successfully." });
-      } else {
-        setCallbackMessage({ type: "error", text: data.message || "Failed to save callback URL." });
-      }
-    } catch {
-      setCallbackMessage({ type: "error", text: "Network error occurred." });
-    } finally {
-      setCallbackSaving(false);
-    }
-  };
-
-  const handleTestCallback = async () => {
-    if (!defaultCallbackUrl.trim()) {
-      setCallbackMessage({ type: "error", text: "Please enter a valid callback URL to test." });
-      return;
-    }
-    setCallbackTesting(true);
-    setCallbackMessage(null);
-    try {
-      const res = await fetch("/api/member/callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "test", callback_url: defaultCallbackUrl.trim() }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCallbackMessage({ type: "success", text: data.message || "Webhook delivered successfully." });
-      } else {
-        setCallbackMessage({ type: "error", text: data.message || "Webhook delivery test failed." });
-      }
-    } catch {
-      setCallbackMessage({ type: "error", text: "Failed to connect to the target endpoint." });
-    } finally {
-      setCallbackTesting(false);
-    }
-  };
 
   const toggleCollapse = (id: string) => {
     setCards((prev) => ({
@@ -967,80 +901,24 @@ export default function ApiDocumentationPage() {
                     </pre>
                   </div>
 
-                  {/* Interactive Live Webhook Tester & Setup */}
-                  <div className="rounded-lg border border-slate-200 bg-[#fafafa] p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-slate-900">
-                        Default Callback URL
-                      </h3>
+                  {/* Webhook Configuration Note */}
+                  <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <Radio className="w-4 h-4 text-emerald-600" />
+                        <span>Webhook &amp; Callback Configuration</span>
+                      </div>
+                      <p className="text-slate-600 mt-0.5">
+                        Webhook callback URLs and connectivity test pings can be configured directly in your Member Account settings.
+                      </p>
                     </div>
-
-                    {userApiKey ? (
-                      <div className="space-y-3">
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input
-                            type="url"
-                            value={defaultCallbackUrl}
-                            onChange={(e) => setDefaultCallbackUrl(e.target.value)}
-                            placeholder="https://yourdomain.com/api/smm/webhook"
-                            className="flex-1 px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-mono"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleSaveCallback}
-                            disabled={callbackSaving}
-                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold rounded-md transition shrink-0 cursor-pointer"
-                          >
-                            {callbackSaving ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Check className="w-3.5 h-3.5" />
-                            )}
-                            <span>Save URL</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleTestCallback}
-                            disabled={callbackTesting || !defaultCallbackUrl.trim()}
-                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-xs font-semibold rounded-md transition shrink-0 cursor-pointer"
-                          >
-                            {callbackTesting ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Send className="w-3.5 h-3.5" />
-                            )}
-                            <span>Send Test Ping</span>
-                          </button>
-                        </div>
-
-                        {callbackMessage && (
-                          <div
-                            className={`p-3 rounded-lg text-xs font-medium flex items-center gap-2 border ${
-                              callbackMessage.type === "success"
-                                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                : "bg-rose-50 border-rose-200 text-rose-800"
-                            }`}
-                          >
-                            {callbackMessage.type === "success" ? (
-                              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                            ) : (
-                              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                            )}
-                            <span>{callbackMessage.text}</span>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="p-3 rounded-lg bg-slate-100 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600">
-                        <span>Sign in to configure and test your default callback URL.</span>
-                        <Link
-                          href="/auth/login"
-                          className="inline-flex items-center justify-center px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded transition shrink-0"
-                        >
-                          Sign In
-                        </Link>
-                      </div>
-                    )}
+                    <Link
+                      href="/member/account"
+                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-md transition shrink-0 cursor-pointer shadow-xs"
+                    >
+                      <span>Manage in Account</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </Link>
                   </div>
                 </div>
               )}

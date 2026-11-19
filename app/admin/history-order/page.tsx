@@ -118,9 +118,6 @@ export default function AdminHistoryOrderPage() {
   const [editStatus, setEditStatus] = useState("");
   const [editRemains, setEditRemains] = useState<number | string>("");
   const [editStart, setEditStart] = useState<number | string>("");
-  const [editCallbackUrl, setEditCallbackUrl] = useState("");
-  const [sendCallbackOnSave, setSendCallbackOnSave] = useState(true);
-  const [isTestingCallback, setIsTestingCallback] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
   // Copied state tracker
@@ -182,13 +179,31 @@ export default function AdminHistoryOrderPage() {
       setOrders((prev) =>
         prev.map((o) =>
           o.invoice === data.invoice
-            ? { ...o, status: data.status, remains: data.remains !== undefined ? data.remains : o.remains }
+            ? {
+                ...o,
+                status: data.status,
+                remains: data.remains !== undefined ? Number(data.remains) : o.remains,
+                start: data.start !== undefined ? Number(data.start) : o.start,
+                refunded: data.refunded !== undefined ? data.refunded : o.refunded,
+                refund_amount: data.refund_amount !== undefined ? data.refund_amount : o.refund_amount,
+              }
             : o
         )
       );
     };
 
-    const handleNewOrder = () => {
+    const handleNewOrder = (e: any) => {
+      const data = e.detail;
+      if (data?.invoice) {
+        setMetrics((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            totalOrders: prev.totalOrders + 1,
+            totalOmset: prev.totalOmset + Number(data.price_sale || 0),
+          };
+        });
+      }
       fetchOrders(true);
     };
 
@@ -215,44 +230,7 @@ export default function AdminHistoryOrderPage() {
     setEditStatus(order.status);
     setEditRemains(order.remains);
     setEditStart(order.start);
-    const cb = order.callback_url || order.user_callback_url || "";
-    setEditCallbackUrl(cb);
-    setSendCallbackOnSave(Boolean(cb));
     setIsEditModalOpen(true);
-  };
-
-  const handleTestCallback = async () => {
-    if (!selectedOrder) return;
-    const urlToTest = editCallbackUrl.trim();
-    if (!urlToTest) {
-      toast.error("URL Callback Kosong", "Masukkan URL Callback webhook terlebih dahulu.");
-      return;
-    }
-
-    setIsTestingCallback(true);
-    try {
-      const res = await fetch("/api/admin/history-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "test_callback",
-          invoice: selectedOrder.invoice,
-          callback_url: urlToTest,
-          server_area: selectedOrder.server_area,
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || "Gagal mengirim test callback.");
-      }
-
-      toast.success("Callback Berhasil", json.message);
-    } catch (err) {
-      toast.error("Callback Gagal", err instanceof Error ? err.message : "Gagal terhubung ke endpoint");
-    } finally {
-      setIsTestingCallback(false);
-    }
   };
 
   const handleSaveOrderUpdate = async (e: React.FormEvent) => {
@@ -270,14 +248,20 @@ export default function AdminHistoryOrderPage() {
           remains: Number(editRemains),
           start: Number(editStart),
           server_area: selectedOrder.server_area,
-          callback_url: editCallbackUrl.trim() || null,
-          send_callback: sendCallbackOnSave,
+          send_callback: true,
         }),
       });
 
       const json = await res.json();
       if (!res.ok || !json.success) {
         throw new Error(json.message || "Gagal memperbarui status");
+      }
+
+      if (typeof window !== "undefined") {
+        try {
+          sessionStorage.setItem("last_admin_manual_invoice", selectedOrder.invoice);
+          setTimeout(() => sessionStorage.removeItem("last_admin_manual_invoice"), 3000);
+        } catch {}
       }
 
       toast.success("Status Diperbarui", json.message);
@@ -303,6 +287,9 @@ export default function AdminHistoryOrderPage() {
     }
 
     setSyncingInvoices((prev) => new Set(prev).add(order.invoice));
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("last_admin_manual_invoice", order.invoice);
+    }
 
     try {
       const res = await fetch("/api/admin/history-order", {
@@ -514,10 +501,76 @@ export default function AdminHistoryOrderPage() {
 
   return (
     <div className="space-y-4 bg-white antialiased">
-      {/* Search, Server Filter & Status Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3.5">
-        {/* Row 1: Search, Filter Status, Limit, and Actions */}
-        <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
+      {/* Overview Stat KPI Cards (Ramping Grid) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Card 1: Total Pesanan */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Total Pesanan</span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <Layers className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            {(metrics?.totalOrders ?? totalOrders).toLocaleString()}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            {serverNode === "ALL" ? "Semua Klaster MongoDB" : `Klaster ${serverNode}`}
+          </div>
+        </div>
+
+        {/* Card 2: Total Omset (Gross Sales) */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Total Omset</span>
+            <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+              <DollarSign className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            ${Number(metrics?.totalOmset ?? 0).toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            Volume penjualan kotor
+          </div>
+        </div>
+
+        {/* Card 3: Total Modal Provider */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Modal Provider</span>
+            <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+              <Shield className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            ${Number(metrics?.totalModal ?? 0).toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            Biaya ke provider API
+          </div>
+        </div>
+
+        {/* Card 4: Estimasi Laba Bersih */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Laba Bersih</span>
+            <div className="w-7 h-7 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
+              <Sparkles className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-emerald-600 tracking-tight">
+            ${Number(metrics?.totalProfit ?? 0).toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            Margin keuntungan bersih
+          </div>
+        </div>
+      </div>
+
+      {/* Search, Server Dropdown Filter & Status Toolbar */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-4 shadow-xs">
+        <div className="flex flex-col lg:flex-row gap-3 items-center justify-between">
           {/* Search Field */}
           <div className="relative flex-1 w-full">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -531,7 +584,28 @@ export default function AdminHistoryOrderPage() {
           </div>
 
           {/* Filters & Actions Group */}
-          <div className="flex items-center gap-2 w-full md:w-auto shrink-0 flex-wrap">
+          <div className="flex items-center gap-2 w-full lg:w-auto shrink-0 flex-wrap justify-between lg:justify-end">
+            {/* Server Dropdown Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+              <Server className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="text-[11px] font-medium text-slate-400">Server:</span>
+              <select
+                value={serverNode}
+                onChange={(e) => {
+                  setServerNode(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-transparent py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer max-w-[140px] sm:max-w-none"
+              >
+                <option value="ALL">Semua Klaster ({metrics?.totalOrders ?? totalOrders})</option>
+                {activeServers.map((srv) => (
+                  <option key={srv.id} value={srv.id}>
+                    {srv.flag} {srv.id} ({srv.isOnline ? "Online" : "Offline"}) - {srv.ordersCount}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Status Dropdown */}
             <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
               <Filter className="w-3.5 h-3.5 text-slate-400" />
@@ -602,70 +676,6 @@ export default function AdminHistoryOrderPage() {
               <span>Export</span>
             </button>
           </div>
-        </div>
-
-        {/* Row 2: Klaster Server Filter Pills */}
-        <div className="pt-2 border-t border-slate-100 flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-200">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
-            <Server className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Server:</span>
-          </span>
-
-          <button
-            onClick={() => {
-              setServerNode("ALL");
-              setPage(1);
-            }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-              serverNode === "ALL"
-                ? "bg-emerald-600 text-white shadow-xs shadow-emerald-600/20"
-                : "bg-slate-50 border border-slate-200/80 text-slate-700 hover:bg-slate-100"
-            }`}
-          >
-            <Globe className="w-3 h-3" />
-            <span>Semua Klaster</span>
-            <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                serverNode === "ALL" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
-              }`}
-            >
-              {metrics?.totalOrders ?? totalOrders}
-            </span>
-          </button>
-
-          {activeServers.map((srv) => {
-            const isSelected = serverNode.toUpperCase() === srv.id.toUpperCase();
-            return (
-              <button
-                key={srv.id}
-                onClick={() => {
-                  setServerNode(srv.id);
-                  setPage(1);
-                }}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-                  isSelected
-                    ? "bg-emerald-600 text-white shadow-xs shadow-emerald-600/20"
-                    : "bg-slate-50 border border-slate-200/80 text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <span>{srv.flag}</span>
-                <span>{srv.id}</span>
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    srv.isOnline ? "bg-emerald-500 animate-pulse" : "bg-slate-300"
-                  }`}
-                  title={srv.isOnline ? `Online (${srv.pingMs}ms)` : "Offline"}
-                />
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                    isSelected ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
-                  }`}
-                >
-                  {srv.ordersCount}
-                </span>
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -1274,13 +1284,13 @@ export default function AdminHistoryOrderPage() {
                 </div>
               </div>
 
-              {/* Webhook Callback Settings */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+              {/* Webhook Callback Otomatis Banner */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                     <Radio className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>URL Callback (IPN Webhook)</span>
-                  </label>
+                    <span>Callback Webhook (Otomatis)</span>
+                  </div>
                   {selectedOrder.callback_status && (
                     <span
                       className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
@@ -1291,51 +1301,31 @@ export default function AdminHistoryOrderPage() {
                           : "bg-slate-200 text-slate-700"
                       }`}
                     >
-                      Status: {selectedOrder.callback_status}
+                      Status Terakhir: {selectedOrder.callback_status}
                     </span>
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={editCallbackUrl}
-                    onChange={(e) => setEditCallbackUrl(e.target.value)}
-                    placeholder="https://domain-klien.com/api/callback"
-                    className="flex-1 px-3 py-2 rounded-xl text-xs bg-white border border-slate-200 text-slate-800 font-mono focus:border-emerald-500 focus:outline-none transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleTestCallback}
-                    disabled={isTestingCallback || !editCallbackUrl.trim()}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
-                    title="Uji coba pengiriman webhook sekarang"
-                  >
-                    {isTestingCallback ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    )}
-                    <span>Test</span>
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between pt-0.5">
-                  <label className="inline-flex items-center gap-2 text-[11px] text-slate-600 font-medium cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={sendCallbackOnSave}
-                      onChange={(e) => setSendCallbackOnSave(e.target.checked)}
-                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                    />
-                    <span>Kirim Callback Webhook otomatis saat status disimpan</span>
-                  </label>
-                  {selectedOrder.user_callback_url && !selectedOrder.callback_url && (
-                    <span className="text-[10px] text-emerald-600 font-mono">
-                      (Terdeteksi dari profil @{selectedOrder.user_username})
+                {selectedOrder.callback_url || selectedOrder.user_callback_url ? (
+                  <div className="flex items-center justify-between gap-2 text-[11px] pt-0.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span
+                        className="font-mono text-emerald-700 font-medium truncate"
+                        title={selectedOrder.callback_url || selectedOrder.user_callback_url || ""}
+                      >
+                        {selectedOrder.callback_url || selectedOrder.user_callback_url}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-emerald-700 bg-emerald-100/70 border border-emerald-200 px-2 py-0.5 rounded-md font-bold shrink-0">
+                      Auto Dispatch
                     </span>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic pt-0.5">
+                    Tidak ada URL callback webhook terdaftar pada pesanan maupun akun @{selectedOrder.user_username}.
+                  </p>
+                )}
               </div>
 
               {/* Dynamic Warning for Automatic Refunds */}

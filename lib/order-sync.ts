@@ -272,6 +272,7 @@ export async function syncActiveOrdersFromProviders(
             }
           }
           await pusherServer.trigger("admin-orders", "order-status-updated", payload);
+          await pusherServer.trigger("admin-notifications", "order-status-updated", payload);
         } catch {}
 
         // Automated Webhook / Callback trigger to client endpoint

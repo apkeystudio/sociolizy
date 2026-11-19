@@ -25,6 +25,8 @@ interface OrderHistoryItem {
   server_area?: string;
   refill?: boolean;
   create_at: string;
+  remains?: number;
+  start?: number;
 }
 
 export default function MemberOrderHistoryPage() {
@@ -35,9 +37,9 @@ export default function MemberOrderHistoryPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       const res = await fetch("/api/member/order?limit=100");
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
@@ -46,7 +48,7 @@ export default function MemberOrderHistoryPage() {
     } catch (err) {
       console.error("Failed to load order history:", err);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
@@ -58,13 +60,28 @@ export default function MemberOrderHistoryPage() {
       if (!data?.invoice) return;
       setOrders((prev) =>
         prev.map((o) =>
-          o.invoice === data.invoice ? { ...o, status: data.status } : o
+          o.invoice === data.invoice
+            ? {
+                ...o,
+                status: data.status,
+                ...(data.remains !== undefined && { remains: data.remains }),
+                ...(data.start !== undefined && { start: data.start }),
+              }
+            : o
         )
       );
+      fetchOrders(true);
     };
 
-    const handleNewOrder = () => {
-      fetchOrders();
+    const handleNewOrder = (e: any) => {
+      const newOrd = e?.detail;
+      if (newOrd && newOrd.invoice) {
+        setOrders((prev) => {
+          if (prev.some((o) => o.invoice === newOrd.invoice)) return prev;
+          return [newOrd, ...prev];
+        });
+      }
+      fetchOrders(true);
     };
 
     window.addEventListener("master_smm:order_status_updated", handleStatusUpdate);
@@ -191,7 +208,7 @@ export default function MemberOrderHistoryPage() {
             )}
 
             <button
-              onClick={fetchOrders}
+              onClick={() => fetchOrders(false)}
               disabled={loading}
               className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs sm:text-sm font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
               title="Refresh List"

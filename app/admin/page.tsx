@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -38,6 +38,9 @@ import {
   RotateCcw,
   SlidersHorizontal,
   ChevronDown,
+  Store,
+  CreditCard,
+  ShoppingCart,
 } from "lucide-react";
 import { useToast } from "@/app/admin/components/toast-context";
 
@@ -143,6 +146,12 @@ interface DashboardStats {
   totalDepositsCount: number;
   pendingDepositsCount: number;
 
+  // Merchant Summary & Transactions
+  merchantSummary?: MerchantSummary;
+
+  // Realtime Chart Series
+  chartData?: ChartDataPoint[];
+
   // Support
   openTicketsCount: number;
   urgentTicketsCount: number;
@@ -152,6 +161,643 @@ interface DashboardStats {
   systemStatus: "operational" | "warning" | "critical";
   systemAlerts: SystemAlert[];
   lastUpdated: string;
+}
+
+export interface ChartDataPoint {
+  date: string;
+  label: string;
+  dayName: string;
+  ordersCount: number;
+  ordersVolume: number;
+  depositsCount: number;
+  depositsVolume: number;
+  merchantCount: number;
+  merchantVolume: number;
+}
+
+export interface MerchantSummary {
+  totalPaidVolume: number;
+  totalPaidCount: number;
+  todayPaidVolume: number;
+  todayPaidCount: number;
+}
+
+/**
+ * Calculates a smooth SVG cubic bezier path string from a set of coordinate points.
+ */
+function getBezierPath(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i === 0 ? 0 : i - 1];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2 < points.length ? i + 2 : i + 1];
+
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+/**
+ * Interactive Real-Time Multi-Transaction Chart:
+ * Displays Orders SMM, Cryptomus Deposits, and Merchant Transactions.
+ */
+function RealtimeTransactionChart({
+  chartData,
+  todayOmset,
+  todayOrdersCount,
+  merchantSummary,
+  formatUSD,
+}: {
+  chartData?: ChartDataPoint[];
+  todayOmset: number;
+  todayOrdersCount: number;
+  merchantSummary?: MerchantSummary;
+  formatUSD: (val: number | string | null | undefined) => string;
+}) {
+  const [metricMode, setMetricMode] = useState<"volume" | "count">("volume");
+  const [activeSeries, setActiveSeries] = useState<"all" | "orders" | "deposits" | "merchant">("all");
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  const points: ChartDataPoint[] = useMemo(() => {
+    if (chartData && chartData.length > 0) return chartData;
+    return Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return {
+        date: d.toISOString().slice(0, 10),
+        label: i === 6 ? "Hari ini" : d.toLocaleDateString("id-ID", { day: "numeric", month: "short" }),
+        dayName: d.toLocaleDateString("id-ID", { weekday: "short" }),
+        ordersCount: 0,
+        ordersVolume: 0,
+        depositsCount: 0,
+        depositsVolume: 0,
+        merchantCount: 0,
+        merchantVolume: 0,
+      };
+    });
+  }, [chartData]);
+
+  // 7-day cumulative totals
+  const total7dOrdersVol = useMemo(() => points.reduce((a: number, b: ChartDataPoint) => a + b.ordersVolume, 0), [points]);
+  const total7dOrdersCount = useMemo(() => points.reduce((a: number, b: ChartDataPoint) => a + b.ordersCount, 0), [points]);
+  const total7dDepVol = useMemo(() => points.reduce((a: number, b: ChartDataPoint) => a + b.depositsVolume, 0), [points]);
+  const total7dDepCount = useMemo(() => points.reduce((a: number, b: ChartDataPoint) => a + b.depositsCount, 0), [points]);
+  const total7dMerchVol = useMemo(() => points.reduce((a: number, b: ChartDataPoint) => a + b.merchantVolume, 0), [points]);
+  const total7dMerchCount = useMemo(() => points.reduce((a: number, b: ChartDataPoint) => a + b.merchantCount, 0), [points]);
+
+  // Today totals
+  const lastPoint = points[points.length - 1];
+  const todayDepVol = lastPoint ? lastPoint.depositsVolume : 0;
+  const todayDepCount = lastPoint ? lastPoint.depositsCount : 0;
+  const todayMerchVol = merchantSummary ? merchantSummary.todayPaidVolume : (lastPoint ? lastPoint.merchantVolume : 0);
+  const todayMerchCount = merchantSummary ? merchantSummary.todayPaidCount : (lastPoint ? lastPoint.merchantCount : 0);
+
+  // SVG Dimension Constants
+  const padL = 60;
+  const padR = 25;
+  const padT = 20;
+  const padB = 35;
+  const svgW = 760;
+  const svgH = 220;
+  const plotW = svgW - padL - padR; // 675
+  const plotH = svgH - padT - padB; // 165
+
+  // Scaling maximum calculation
+  const maxVal = useMemo(() => {
+    let max = 0;
+    for (const pt of points) {
+      if (metricMode === "volume") {
+        if (activeSeries === "all" || activeSeries === "orders") max = Math.max(max, pt.ordersVolume);
+        if (activeSeries === "all" || activeSeries === "deposits") max = Math.max(max, pt.depositsVolume);
+        if (activeSeries === "all" || activeSeries === "merchant") max = Math.max(max, pt.merchantVolume);
+      } else {
+        if (activeSeries === "all" || activeSeries === "orders") max = Math.max(max, pt.ordersCount);
+        if (activeSeries === "all" || activeSeries === "deposits") max = Math.max(max, pt.depositsCount);
+        if (activeSeries === "all" || activeSeries === "merchant") max = Math.max(max, pt.merchantCount);
+      }
+    }
+    const safeBase = metricMode === "volume" ? 25 : 5;
+    return Math.max(max * 1.25, safeBase);
+  }, [points, metricMode, activeSeries]);
+
+  const numPoints = points.length;
+
+  const orderCoords = useMemo(() => {
+    return points.map((pt, i) => {
+      const x = padL + (i / (numPoints - 1 || 1)) * plotW;
+      const val = metricMode === "volume" ? pt.ordersVolume : pt.ordersCount;
+      const y = padT + plotH - (Math.max(0, val) / maxVal) * plotH;
+      return { x, y, val, pt };
+    });
+  }, [points, metricMode, maxVal, numPoints, padL, plotW, padT, plotH]);
+
+  const depositCoords = useMemo(() => {
+    return points.map((pt, i) => {
+      const x = padL + (i / (numPoints - 1 || 1)) * plotW;
+      const val = metricMode === "volume" ? pt.depositsVolume : pt.depositsCount;
+      const y = padT + plotH - (Math.max(0, val) / maxVal) * plotH;
+      return { x, y, val, pt };
+    });
+  }, [points, metricMode, maxVal, numPoints, padL, plotW, padT, plotH]);
+
+  const merchantCoords = useMemo(() => {
+    return points.map((pt, i) => {
+      const x = padL + (i / (numPoints - 1 || 1)) * plotW;
+      const val = metricMode === "volume" ? pt.merchantVolume : pt.merchantCount;
+      const y = padT + plotH - (Math.max(0, val) / maxVal) * plotH;
+      return { x, y, val, pt };
+    });
+  }, [points, metricMode, maxVal, numPoints, padL, plotW, padT, plotH]);
+
+  const orderLine = useMemo(() => getBezierPath(orderCoords), [orderCoords]);
+  const depositLine = useMemo(() => getBezierPath(depositCoords), [depositCoords]);
+  const merchantLine = useMemo(() => getBezierPath(merchantCoords), [merchantCoords]);
+
+  const orderArea = useMemo(() => {
+    if (orderCoords.length === 0) return "";
+    return `${orderLine} L ${orderCoords[orderCoords.length - 1].x.toFixed(1)} ${(padT + plotH).toFixed(1)} L ${orderCoords[0].x.toFixed(1)} ${(padT + plotH).toFixed(1)} Z`;
+  }, [orderLine, orderCoords, padT, plotH]);
+
+  const depositArea = useMemo(() => {
+    if (depositCoords.length === 0) return "";
+    return `${depositLine} L ${depositCoords[depositCoords.length - 1].x.toFixed(1)} ${(padT + plotH).toFixed(1)} L ${depositCoords[0].x.toFixed(1)} ${(padT + plotH).toFixed(1)} Z`;
+  }, [depositLine, depositCoords, padT, plotH]);
+
+  const merchantArea = useMemo(() => {
+    if (merchantCoords.length === 0) return "";
+    return `${merchantLine} L ${merchantCoords[merchantCoords.length - 1].x.toFixed(1)} ${(padT + plotH).toFixed(1)} L ${merchantCoords[0].x.toFixed(1)} ${(padT + plotH).toFixed(1)} Z`;
+  }, [merchantLine, merchantCoords, padT, plotH]);
+
+  const yTicks = [0, 0.33, 0.66, 1.0].map((pct) => {
+    const val = maxVal * pct;
+    const y = padT + plotH - pct * plotH;
+    const label = metricMode === "volume"
+      ? `$${val >= 1000 ? `${(val / 1000).toFixed(1)}k` : Math.round(val)}`
+      : `${val >= 1000 ? `${(val / 1000).toFixed(1)}k` : Math.round(val)}`;
+    return { y, label };
+  });
+
+  const handleSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const scale = svgW / rect.width;
+    const svgX = mouseX * scale;
+
+    let closestIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < numPoints; i++) {
+      const ptX = padL + (i / (numPoints - 1 || 1)) * plotW;
+      const dist = Math.abs(svgX - ptX);
+      if (dist < minDist) {
+        minDist = dist;
+        closestIdx = i;
+      }
+    }
+    setHoveredIndex(closestIdx);
+  };
+
+  const hoveredPoint = hoveredIndex !== null ? points[hoveredIndex] : null;
+
+  return (
+    <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200/80 shadow-xs space-y-5">
+      {/* 1. Header Toolbar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+            <h3 className="font-black text-slate-900 text-sm sm:text-base tracking-tight">
+              Grafik Transaksi Real-time
+            </h3>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Live Pusher</span>
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 font-medium mt-1">
+            Monitoring aktivitas 7 hari terakhir untuk Pesanan SMM, Deposit Saldo, dan Transaksi Merchant
+          </p>
+        </div>
+
+        {/* Series Filter Tabs & Metric Selector */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Series Tabs */}
+          <div className="flex items-center bg-slate-100/90 p-1 rounded-2xl border border-slate-200/80 text-xs font-bold text-slate-600">
+            <button
+              onClick={() => setActiveSeries("all")}
+              className={`px-2.5 py-1 rounded-xl transition-all cursor-pointer text-[11px] ${
+                activeSeries === "all"
+                  ? "bg-white text-slate-900 shadow-xs font-extrabold"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              Semua
+            </button>
+            <button
+              onClick={() => setActiveSeries("orders")}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl transition-all cursor-pointer text-[11px] ${
+                activeSeries === "orders"
+                  ? "bg-white text-emerald-700 shadow-xs font-extrabold"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span>Pesanan</span>
+            </button>
+            <button
+              onClick={() => setActiveSeries("deposits")}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl transition-all cursor-pointer text-[11px] ${
+                activeSeries === "deposits"
+                  ? "bg-white text-sky-700 shadow-xs font-extrabold"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-sky-500" />
+              <span>Deposit</span>
+            </button>
+            <button
+              onClick={() => setActiveSeries("merchant")}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl transition-all cursor-pointer text-[11px] ${
+                activeSeries === "merchant"
+                  ? "bg-white text-purple-700 shadow-xs font-extrabold"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-purple-500" />
+              <span>Merchant</span>
+            </button>
+          </div>
+
+          {/* Metric Toggle: Volume ($) vs Count */}
+          <div className="flex items-center bg-slate-100/90 p-1 rounded-2xl border border-slate-200/80 text-xs font-bold text-slate-600">
+            <button
+              onClick={() => setMetricMode("volume")}
+              className={`px-2.5 py-1 rounded-xl transition-all cursor-pointer text-[11px] ${
+                metricMode === "volume"
+                  ? "bg-white text-emerald-700 shadow-xs font-extrabold"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              Volume ($)
+            </button>
+            <button
+              onClick={() => setMetricMode("count")}
+              className={`px-2.5 py-1 rounded-xl transition-all cursor-pointer text-[11px] ${
+                metricMode === "count"
+                  ? "bg-white text-emerald-700 shadow-xs font-extrabold"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              Frekuensi
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Top Summary KPI Cards for the 3 Categories */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Metric 1: SMM Orders */}
+        <div
+          onClick={() => setActiveSeries(activeSeries === "orders" ? "all" : "orders")}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+            activeSeries === "orders" || activeSeries === "all"
+              ? "bg-emerald-50/40 border-emerald-200/80 hover:border-emerald-300"
+              : "bg-slate-50/50 border-slate-200/60 opacity-60 hover:opacity-100"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                <ShoppingCart className="w-3.5 h-3.5" />
+              </div>
+              <span className="text-xs font-bold text-slate-800">Pesanan SMM</span>
+            </div>
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.5 rounded">
+              Hari ini: +{todayOrdersCount}
+            </span>
+          </div>
+
+          <div className="mt-2.5 flex items-baseline justify-between">
+            <span className="text-lg font-black text-slate-900 font-mono tracking-tight">
+              {formatUSD(todayOmset)}
+            </span>
+            <span className="text-[11px] text-slate-500 font-medium">
+              7 Hari: <span className="font-bold text-emerald-700">{formatUSD(total7dOrdersVol)}</span> ({total7dOrdersCount})
+            </span>
+          </div>
+        </div>
+
+        {/* Metric 2: Cryptomus Deposits */}
+        <div
+          onClick={() => setActiveSeries(activeSeries === "deposits" ? "all" : "deposits")}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+            activeSeries === "deposits" || activeSeries === "all"
+              ? "bg-sky-50/40 border-sky-200/80 hover:border-sky-300"
+              : "bg-slate-50/50 border-slate-200/60 opacity-60 hover:opacity-100"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-600">
+                <Wallet className="w-3.5 h-3.5" />
+              </div>
+              <span className="text-xs font-bold text-slate-800">Deposit Cryptomus</span>
+            </div>
+            <span className="text-[10px] font-bold text-sky-700 bg-sky-100/70 px-1.5 py-0.5 rounded">
+              Hari ini: +{todayDepCount}
+            </span>
+          </div>
+
+          <div className="mt-2.5 flex items-baseline justify-between">
+            <span className="text-lg font-black text-slate-900 font-mono tracking-tight">
+              {formatUSD(todayDepVol)}
+            </span>
+            <span className="text-[11px] text-slate-500 font-medium">
+              7 Hari: <span className="font-bold text-sky-700">{formatUSD(total7dDepVol)}</span> ({total7dDepCount})
+            </span>
+          </div>
+        </div>
+
+        {/* Metric 3: Merchant Transactions */}
+        <div
+          onClick={() => setActiveSeries(activeSeries === "merchant" ? "all" : "merchant")}
+          className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+            activeSeries === "merchant" || activeSeries === "all"
+              ? "bg-purple-50/40 border-purple-200/80 hover:border-purple-300"
+              : "bg-slate-50/50 border-slate-200/60 opacity-60 hover:opacity-100"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-purple-50 border border-purple-200 flex items-center justify-center text-purple-600">
+                <Store className="w-3.5 h-3.5" />
+              </div>
+              <span className="text-xs font-bold text-slate-800">Transaksi Merchant</span>
+            </div>
+            <span className="text-[10px] font-bold text-purple-700 bg-purple-100/70 px-1.5 py-0.5 rounded">
+              Hari ini: +{todayMerchCount}
+            </span>
+          </div>
+
+          <div className="mt-2.5 flex items-baseline justify-between">
+            <span className="text-lg font-black text-slate-900 font-mono tracking-tight">
+              {formatUSD(todayMerchVol)}
+            </span>
+            <span className="text-[11px] text-slate-500 font-medium">
+              7 Hari: <span className="font-bold text-purple-700">{formatUSD(total7dMerchVol)}</span> ({total7dMerchCount})
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Interactive SVG Chart Canvas */}
+      <div className="relative bg-slate-50/60 border border-slate-200/70 rounded-2xl p-3 sm:p-4 overflow-hidden">
+        {/* Floating Tooltip Bubble */}
+        {hoveredPoint && (
+          <div className="absolute top-3 right-4 z-20 bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-xl rounded-2xl p-3 text-xs pointer-events-none animate-in fade-in duration-100 min-w-[200px]">
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wide border-b border-slate-100 pb-1 mb-2">
+              {hoveredPoint.dayName}, {hoveredPoint.label} ({hoveredPoint.date})
+            </div>
+            <div className="space-y-1.5 font-medium">
+              <div className="flex items-center justify-between gap-3 text-slate-700">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Pesanan SMM:</span>
+                </span>
+                <span className="font-mono font-bold text-slate-900">
+                  {metricMode === "volume"
+                    ? formatUSD(hoveredPoint.ordersVolume)
+                    : `${hoveredPoint.ordersCount} order`}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 text-slate-700">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-500" />
+                  <span>Deposit:</span>
+                </span>
+                <span className="font-mono font-bold text-slate-900">
+                  {metricMode === "volume"
+                    ? formatUSD(hoveredPoint.depositsVolume)
+                    : `${hoveredPoint.depositsCount} dep`}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 text-slate-700">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-purple-500" />
+                  <span>Merchant:</span>
+                </span>
+                <span className="font-mono font-bold text-slate-900">
+                  {metricMode === "volume"
+                    ? formatUSD(hoveredPoint.merchantVolume)
+                    : `${hoveredPoint.merchantCount} tx`}
+                </span>
+              </div>
+
+              <div className="border-t border-slate-100 pt-1.5 mt-1 flex items-center justify-between text-slate-900 font-bold">
+                <span>Total Gabungan:</span>
+                <span className="font-mono text-emerald-700">
+                  {metricMode === "volume"
+                    ? formatUSD(hoveredPoint.ordersVolume + hoveredPoint.depositsVolume + hoveredPoint.merchantVolume)
+                    : `${hoveredPoint.ordersCount + hoveredPoint.depositsCount + hoveredPoint.merchantCount} total`}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <svg
+          viewBox={`0 0 ${svgW} ${svgH}`}
+          className="w-full h-56 sm:h-64 cursor-crosshair overflow-visible"
+          onMouseMove={handleSvgMouseMove}
+          onMouseLeave={() => setHoveredIndex(null)}
+        >
+          <defs>
+            {/* Emerald Gradient for SMM Orders */}
+            <linearGradient id="orderGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            </linearGradient>
+
+            {/* Sky Gradient for Deposits */}
+            <linearGradient id="depositGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.30" />
+              <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.0" />
+            </linearGradient>
+
+            {/* Purple Gradient for Merchant */}
+            <linearGradient id="merchantGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.30" />
+              <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* Grid lines and Y-axis text */}
+          {yTicks.map((tick, idx) => (
+            <g key={idx}>
+              <line
+                x1={padL}
+                y1={tick.y}
+                x2={svgW - padR}
+                y2={tick.y}
+                stroke="#e2e8f0"
+                strokeDasharray="4 4"
+                strokeWidth="1"
+              />
+              <text
+                x={padL - 10}
+                y={tick.y + 4}
+                textAnchor="end"
+                className="text-[10px] fill-slate-400 font-mono font-medium"
+              >
+                {tick.label}
+              </text>
+            </g>
+          ))}
+
+          {/* Area Fills */}
+          {(activeSeries === "all" || activeSeries === "merchant") && merchantArea && (
+            <path d={merchantArea} fill="url(#merchantGrad)" className="transition-all duration-300" />
+          )}
+
+          {(activeSeries === "all" || activeSeries === "deposits") && depositArea && (
+            <path d={depositArea} fill="url(#depositGrad)" className="transition-all duration-300" />
+          )}
+
+          {(activeSeries === "all" || activeSeries === "orders") && orderArea && (
+            <path d={orderArea} fill="url(#orderGrad)" className="transition-all duration-300" />
+          )}
+
+          {/* Line Strokes */}
+          {(activeSeries === "all" || activeSeries === "merchant") && merchantLine && (
+            <path
+              d={merchantLine}
+              fill="none"
+              stroke="#8b5cf6"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="transition-all duration-300"
+            />
+          )}
+
+          {(activeSeries === "all" || activeSeries === "deposits") && depositLine && (
+            <path
+              d={depositLine}
+              fill="none"
+              stroke="#0ea5e9"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="transition-all duration-300"
+            />
+          )}
+
+          {(activeSeries === "all" || activeSeries === "orders") && orderLine && (
+            <path
+              d={orderLine}
+              fill="none"
+              stroke="#10b981"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="transition-all duration-300"
+            />
+          )}
+
+          {/* Hover guideline */}
+          {hoveredIndex !== null && (
+            <line
+              x1={padL + (hoveredIndex / (numPoints - 1 || 1)) * plotW}
+              y1={padT}
+              x2={padL + (hoveredIndex / (numPoints - 1 || 1)) * plotW}
+              y2={padT + plotH}
+              stroke="#64748b"
+              strokeWidth="1.5"
+              strokeDasharray="3 3"
+            />
+          )}
+
+          {/* Data Points */}
+          {points.map((_, i) => {
+            const isHovered = hoveredIndex === i;
+            const oPt = orderCoords[i];
+            const dPt = depositCoords[i];
+            const mPt = merchantCoords[i];
+
+            return (
+              <g key={i}>
+                {(activeSeries === "all" || activeSeries === "merchant") && mPt && (
+                  <circle
+                    cx={mPt.x}
+                    cy={mPt.y}
+                    r={isHovered ? 5.5 : 3.5}
+                    fill="#8b5cf6"
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    className="transition-all duration-150"
+                  />
+                )}
+
+                {(activeSeries === "all" || activeSeries === "deposits") && dPt && (
+                  <circle
+                    cx={dPt.x}
+                    cy={dPt.y}
+                    r={isHovered ? 5.5 : 3.5}
+                    fill="#0ea5e9"
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    className="transition-all duration-150"
+                  />
+                )}
+
+                {(activeSeries === "all" || activeSeries === "orders") && oPt && (
+                  <circle
+                    cx={oPt.x}
+                    cy={oPt.y}
+                    r={isHovered ? 5.5 : 3.5}
+                    fill="#10b981"
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    className="transition-all duration-150"
+                  />
+                )}
+              </g>
+            );
+          })}
+
+          {/* X-axis Date Labels */}
+          {points.map((pt, i) => {
+            const x = padL + (i / (numPoints - 1 || 1)) * plotW;
+            const isHovered = hoveredIndex === i;
+            return (
+              <text
+                key={i}
+                x={x}
+                y={padT + plotH + 20}
+                textAnchor="middle"
+                className={`text-[10px] font-medium transition-colors ${
+                  isHovered ? "fill-emerald-700 font-bold" : "fill-slate-400"
+                }`}
+              >
+                {pt.label}
+              </text>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
 }
 
 export default function AdminDashboardPage() {
@@ -175,6 +821,9 @@ export default function AdminDashboardPage() {
 
   // Filter for recent orders table
   const [orderFilter, setOrderFilter] = useState<string>("ALL");
+
+  // Server selection state for Cluster Database widget
+  const [selectedServerId, setSelectedServerId] = useState<string>("ALL");
 
   // Format currency helper
   const formatUSD = (val: number | string | null | undefined) => {
@@ -247,6 +896,27 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     fetchStats(false);
   }, []);
+
+  // Realtime Pusher event listener for transactions and updates
+  useEffect(() => {
+    const handleTransactionChange = () => {
+      fetchStats(false);
+    };
+
+    window.addEventListener("master_smm:admin_order_created", handleTransactionChange);
+    window.addEventListener("master_smm:admin_order_updated", handleTransactionChange);
+    window.addEventListener("master_smm:admin_deposit_created", handleTransactionChange);
+    window.addEventListener("master_smm:admin_deposit_updated", handleTransactionChange);
+    window.addEventListener("master_smm:user_registered", handleTransactionChange);
+
+    return () => {
+      window.removeEventListener("master_smm:admin_order_created", handleTransactionChange);
+      window.removeEventListener("master_smm:admin_order_updated", handleTransactionChange);
+      window.removeEventListener("master_smm:admin_deposit_created", handleTransactionChange);
+      window.removeEventListener("master_smm:admin_deposit_updated", handleTransactionChange);
+      window.removeEventListener("master_smm:user_registered", handleTransactionChange);
+    };
+  }, [fetchStats]);
 
   // Realtime countdown ticker
   useEffect(() => {
@@ -393,6 +1063,17 @@ export default function AdminDashboardPage() {
     if (orderFilter === "ALL") return true;
     return ord.status.toLowerCase() === orderFilter.toLowerCase();
   });
+
+  // Server cluster node calculations
+  const totalClusterNodes = stats?.activeServers?.length || 0;
+  const onlineClusterCount = (stats?.activeServers || []).filter((s) => s.isOnline).length;
+  const totalClusterDocs = (stats?.activeServers || []).reduce((acc, s) => acc + (s.ordersCount || 0), 0);
+  const onlineWithPing = (stats?.activeServers || []).filter((s) => s.isOnline && s.pingMs !== null);
+  const clusterAvgLatency =
+    onlineWithPing.length > 0
+      ? Math.round(onlineWithPing.reduce((acc, s) => acc + (s.pingMs || 0), 0) / onlineWithPing.length)
+      : 10;
+  const selectedServer = (stats?.activeServers || []).find((s) => s.id === selectedServerId);
 
   return (
     <div className="space-y-6 pb-12">
@@ -584,8 +1265,8 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* 3. Core Executive Analytics HUD (6 Cards Grid) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* 3. Core Executive Analytics HUD (6 Cards Grid - Natural Height) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 items-start">
         {/* Card 1: Gross Sales / Turnover */}
         <div className="p-4 sm:p-5 rounded-3xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-300 hover:shadow-md transition-all group flex flex-col justify-between">
           <div>
@@ -741,6 +1422,15 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
+      {/* Real-time Multi-Transaction Analytics Chart (Orders, Deposits, Merchant) */}
+      <RealtimeTransactionChart
+        chartData={stats?.chartData}
+        todayOmset={stats?.todayOmset || 0}
+        todayOrdersCount={stats?.todayOrdersCount || 0}
+        merchantSummary={stats?.merchantSummary}
+        formatUSD={formatUSD}
+      />
+
       {/* 4. Live Order Pipeline & Queue Distribution */}
       <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200/80 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
@@ -853,9 +1543,9 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* 5. Middle Grid: Multi-Cluster MongoDB Monitoring + API Provider Gateway */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column (7 cols): API Provider Real-Time Gateway & 1-Click Sync */}
-        <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 sm:p-6 flex flex-col justify-between">
+        <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 sm:p-6 flex flex-col">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -984,82 +1674,163 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Right Column (5 cols): Multi-Cluster MongoDB Infrastructure Health */}
-        <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 sm:p-6 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-4">
+        {/* Right Column (5 cols): Multi-Cluster MongoDB Infrastructure with Dropdown Selector */}
+        <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                <HardDrive className="w-4 h-4" />
+              </div>
               <div>
-                <h3 className="font-black text-slate-900 text-sm sm:text-base tracking-tight flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-emerald-600" />
+                <h3 className="font-black text-slate-900 text-sm sm:text-base tracking-tight">
                   Cluster Database Node
                 </h3>
+                <span className="text-[11px] text-slate-400 font-medium">
+                  {onlineClusterCount}/{totalClusterNodes} Node Online
+                </span>
               </div>
-
-              <Link
-                href="/admin/server"
-                className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-              >
-                <span>Konfigurasi</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Link>
             </div>
 
-            {/* Server Nodes Grid */}
-            <div className="space-y-2.5">
-              {stats && stats.activeServers.length > 0 ? (
-                stats.activeServers.map((srv) => (
-                  <div
-                    key={srv.id}
-                    className="p-3 rounded-2xl bg-slate-50/70 border border-slate-200/80 hover:bg-white hover:border-emerald-300 transition-all flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className="text-xl">{srv.flag || "🌐"}</div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-900 text-xs sm:text-sm">{srv.id}</span>
-                          <span className="text-[10px] font-mono text-slate-400">({srv.group})</span>
-                        </div>
-                        <span className="text-[11px] text-slate-500 font-medium block">
-                          {srv.regionName}
-                        </span>
-                      </div>
-                    </div>
+            <Link
+              href="/admin/server"
+              className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+            >
+              <span>Konfigurasi</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
 
-                    <div className="text-right flex items-center gap-3">
-                      <div>
-                        <span className="text-[11px] font-mono font-bold text-slate-800 block">
-                          {srv.ordersCount.toLocaleString()} doc
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-medium">Beban Shard</span>
-                      </div>
-
-                      <div
-                        className={`px-2 py-1 rounded-xl text-[10px] font-bold border flex items-center gap-1 font-mono ${
-                          srv.isOnline
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-rose-50 text-rose-700 border-rose-200"
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            srv.isOnline ? "bg-emerald-500" : "bg-rose-500"
-                          }`}
-                        />
-                        <span>{srv.isOnline ? `${srv.pingMs || 10}ms` : "Offline"}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl">
-                  Tidak ada cluster node yang terdaftar.
-                </div>
-              )}
+          {/* Server Dropdown Selector */}
+          <div className="bg-slate-50 p-2 rounded-2xl border border-slate-200/80">
+            <div className="flex items-center gap-2">
+              <Server className="w-4 h-4 text-emerald-600 shrink-0 ml-1" />
+              <select
+                value={selectedServerId}
+                onChange={(e) => setSelectedServerId(e.target.value)}
+                className="w-full bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer py-1"
+              >
+                <option value="ALL">🌐 Semua Klaster ({totalClusterNodes} Node Terhubung)</option>
+                {(stats?.activeServers || []).map((srv) => (
+                  <option key={srv.id} value={srv.id}>
+                    {srv.flag || "🌐"} {srv.id} &bull; {srv.regionName} ({srv.isOnline ? `${srv.pingMs || 10}ms` : "Offline"})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
+          {/* Selected Server Content */}
+          {selectedServerId === "ALL" || !selectedServer ? (
+            <div className="space-y-3">
+              {/* Cluster Overview Metrics */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-3 rounded-2xl bg-emerald-50/50 border border-emerald-100">
+                  <span className="text-[10px] font-bold text-emerald-700 uppercase block">Status Node</span>
+                  <div className="text-base font-black text-emerald-950 font-mono mt-0.5">
+                    {onlineClusterCount}/{totalClusterNodes}
+                  </div>
+                  <span className="text-[10px] text-emerald-600 font-medium">100% Siap</span>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-sky-50/50 border border-sky-100">
+                  <span className="text-[10px] font-bold text-sky-700 uppercase block">Rata2 Ping</span>
+                  <div className="text-base font-black text-sky-950 font-mono mt-0.5">
+                    {clusterAvgLatency} <span className="text-[10px]">ms</span>
+                  </div>
+                  <span className="text-[10px] text-sky-600 font-medium">Cepat & Stabil</span>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-violet-50/50 border border-violet-100">
+                  <span className="text-[10px] font-bold text-violet-700 uppercase block">Beban Shard</span>
+                  <div className="text-base font-black text-violet-950 font-mono mt-0.5">
+                    {totalClusterDocs.toLocaleString()}
+                  </div>
+                  <span className="text-[10px] text-violet-600 font-medium">Total Dokumen</span>
+                </div>
+              </div>
+
+              {/* Clickable Quick Server Pills */}
+              <div className="pt-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                  Daftar Node Cepat:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(stats?.activeServers || []).map((srv) => (
+                    <button
+                      key={srv.id}
+                      type="button"
+                      onClick={() => setSelectedServerId(srv.id)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold bg-slate-50 hover:bg-emerald-50 border border-slate-200/80 hover:border-emerald-300 text-slate-700 transition-colors cursor-pointer"
+                    >
+                      <span>{srv.flag || "🌐"}</span>
+                      <span>{srv.id}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${srv.isOnline ? "bg-emerald-500" : "bg-rose-500"}`} />
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {srv.isOnline ? `${srv.pingMs || 10}ms` : "Off"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Detailed Card for Selected Node */}
+              <div className="p-4 rounded-2xl bg-emerald-50/40 border border-emerald-200/80">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="text-3xl">{selectedServer.flag || "🌐"}</div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-slate-900 text-base">{selectedServer.id}</span>
+                        <span className="text-[10px] font-mono font-bold text-slate-500 bg-white px-2 py-0.5 rounded-lg border border-slate-200">
+                          {selectedServer.group}
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-600 font-medium block mt-0.5">
+                        {selectedServer.regionName}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold border flex items-center gap-1.5 font-mono ${
+                      selectedServer.isOnline
+                        ? "bg-white text-emerald-700 border-emerald-200 shadow-xs"
+                        : "bg-white text-rose-700 border-rose-200 shadow-xs"
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        selectedServer.isOnline ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+                      }`}
+                    />
+                    <span>{selectedServer.isOnline ? `${selectedServer.pingMs || 10}ms` : "Offline"}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3.5 pt-3 border-t border-emerald-100 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-medium block">Total Dokumen Shard</span>
+                    <span className="font-mono font-black text-slate-900 text-sm">
+                      {selectedServer.ordersCount.toLocaleString()} Order
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedServerId("ALL")}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-700 bg-white border border-emerald-200 hover:bg-emerald-50 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Lihat Semua Node</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Quick Management Shortcuts */}
-          <div className="pt-4 border-t border-slate-100 mt-4">
+          <div className="pt-3 border-t border-slate-100">
             <div className="grid grid-cols-3 gap-2">
               <Link
                 href="/admin/user"
@@ -1238,10 +2009,10 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* 7. Bottom Grid: Platform Breakdown + Recent Users */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* 7. Bottom Grid: Platform Breakdown + Recent Users (Independent Natural Height) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column (5 cols): Platform Category Distribution */}
-        <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 sm:p-6 flex flex-col justify-between">
+        <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 sm:p-6 flex flex-col">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -1290,7 +2061,7 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Right Column (7 cols): Latest Registered Users */}
-        <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden flex flex-col justify-between">
+        <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden flex flex-col">
           <div>
             <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between gap-3">
               <div>

@@ -48,7 +48,7 @@ export default async function MemberDashboardPage() {
                 <Wallet className="w-4 h-4 text-emerald-600" />
               </div>
             </div>
-            <div className="text-2xl font-bold font-mono text-emerald-600">
+            <div data-member-balance className="text-2xl font-bold font-mono text-emerald-600">
               ${userBalance.toFixed(2)}
             </div>
           </div>

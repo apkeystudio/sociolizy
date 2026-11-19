@@ -168,85 +168,82 @@ export default function AdminServerMonitoringPage() {
   }, [filteredServers, currentPage, pageSize]);
 
   return (
-    <div className="space-y-6">
-      {/* Unified Table Section Card */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        {/* Card Header Toolbar: Region Tabs, Controls & Search/Filters */}
-        <div className="p-4 sm:p-5 border-b border-slate-200 space-y-3.5 bg-white">
-          {/* Top Row: Region Selector Tabs + Action Buttons */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            {/* Region Selector Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-thin scrollbar-thumb-slate-200">
-              <button
-                onClick={() => setSelectedRegion("ALL")}
-                className={`flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  selectedRegion === "ALL"
-                    ? "bg-slate-900 text-white shadow-xs"
-                    : "bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                }`}
-              >
-                <span>Semua Wilayah ({data?.stats.totalServers ?? 0})</span>
-              </button>
-
-              {data?.regions.map((reg) => {
-                const isSelected = selectedRegion === reg.code;
-                return (
-                  <button
-                    key={reg.code}
-                    onClick={() => setSelectedRegion(reg.code)}
-                    className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                      isSelected
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>{reg.flag}</span>
-                    <span>{reg.name}</span>
-                    <span
-                      className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
-                        isSelected
-                          ? "bg-white/20 text-white"
-                          : "bg-white text-slate-500 border border-slate-200"
-                      }`}
-                    >
-                      {reg.serversCount}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Action Buttons inside Card */}
-            <div className="flex items-center gap-2 flex-shrink-0 justify-end">
-              {/* Auto Refresh Toggle */}
-              <button
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                  autoRefresh
-                    ? "bg-emerald-50 border-emerald-300 text-emerald-700"
-                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <span className={`w-2 h-2 rounded-full ${autoRefresh ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`} />
-                <span>Auto Refresh: {autoRefresh ? "ON" : "OFF"}</span>
-              </button>
-
-              {/* Manual Refresh */}
-              <button
-                onClick={() => fetchServers()}
-                disabled={isRefreshing}
-                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 shadow-xs transition-all cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-                <span>{isRefreshing ? "Menyegarkan..." : "Segarkan"}</span>
-              </button>
+    <div className="space-y-4">
+      {/* Overview Stat KPI Cards (Ramping Grid) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Card 1: Total Database Node */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Total Database Node</span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <Server className="w-3.5 h-3.5" />
             </div>
           </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            {data?.stats.totalServers ?? 0}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            {data?.stats.totalRegions ?? 0} Wilayah Global MongoDB
+          </div>
+        </div>
 
-          {/* Search & Filter Row */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
-            {/* Search */}
-            <div className="relative w-full sm:w-80">
+        {/* Card 2: Cluster Health / Online Nodes */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Kesehatan Klaster</span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-emerald-600 tracking-tight">
+            {data?.stats.onlineCount ?? 0} Online
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            100% Aktif Paralel Multi-Region
+          </div>
+        </div>
+
+        {/* Card 3: Avg Global Latency */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Rata-rata Latensi</span>
+            <div className="w-7 h-7 rounded-lg bg-cyan-50 text-cyan-600 flex items-center justify-center">
+              <Activity className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-baseline gap-1">
+            <span>{data?.stats.avgLatency ?? 0}</span>
+            <span className="text-xs font-bold text-slate-500">ms</span>
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            Klaster Responsif &bull; Jitter Rendah
+          </div>
+        </div>
+
+        {/* Card 4: Throughput & Allocated Users */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-emerald-200 transition-all">
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1.5">
+            <span className="font-semibold text-slate-600">Throughput Trafik</span>
+            <div className="w-7 h-7 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+              <Zap className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            {data?.stats.totalThroughput ? data.stats.totalThroughput.toLocaleString("id-ID") : "0"}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+            {data?.stats.totalAssignedUsers ?? 0} Pengguna dialokasikan
+          </div>
+        </div>
+      </div>
+
+      {/* Unified Table Section Card */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        {/* Card Header Toolbar: Search, Region Dropdown, Status Filter & Controls */}
+        <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-white">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1 w-full lg:max-w-md">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <Search className="w-4 h-4" />
               </div>
@@ -259,16 +256,34 @@ export default function AdminServerMonitoringPage() {
               />
             </div>
 
-            {/* Status Filter & Page Size Selector */}
-            <div className="flex items-center gap-3 w-full sm:w-auto justify-end flex-wrap">
+            {/* Filter Dropdowns & Controls */}
+            <div className="flex items-center gap-2 flex-wrap justify-between lg:justify-end">
+              {/* Region / Server Dropdown */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+                <Globe className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-[11px] font-medium text-slate-400">Wilayah:</span>
+                <select
+                  value={selectedRegion}
+                  onChange={(e) => setSelectedRegion(e.target.value)}
+                  className="bg-transparent py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer max-w-[150px] sm:max-w-none"
+                >
+                  <option value="ALL">Semua Wilayah ({data?.stats.totalServers ?? 0})</option>
+                  {data?.regions.map((reg) => (
+                    <option key={reg.code} value={reg.code}>
+                      {reg.flag} {reg.name} ({reg.serversCount} Node)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Status Select */}
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
-                <Filter className="w-3.5 h-3.5" />
-                <span>Status:</span>
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+                <Filter className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-[11px] font-medium text-slate-400">Status:</span>
                 <select
                   value={selectedStatus}
                   onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="px-2.5 py-1.5 rounded-xl text-xs bg-slate-50 border border-slate-200 text-slate-800 font-medium focus:outline-none cursor-pointer"
+                  className="bg-transparent py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
                 >
                   <option value="ALL">Semua Status</option>
                   <option value="online">Online</option>
@@ -278,20 +293,45 @@ export default function AdminServerMonitoringPage() {
               </div>
 
               {/* Rows per page */}
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-bold">
-                <span>Tampilkan:</span>
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+                <span className="text-[11px] font-medium text-slate-400">Baris:</span>
                 <select
                   value={pageSize}
                   onChange={(e) => setPageSize(Number(e.target.value))}
-                  className="px-2.5 py-1.5 rounded-xl text-xs bg-slate-50 border border-slate-200 text-slate-800 font-medium focus:outline-none cursor-pointer"
+                  className="bg-transparent py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
                 >
-                  <option value={10}>10 Baris</option>
-                  <option value={25}>25 Baris</option>
-                  <option value={50}>50 Baris</option>
-                  <option value={100}>100 Baris</option>
-                  <option value={0}>Semua Server</option>
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={0}>Semua</option>
                 </select>
               </div>
+
+              {/* Auto Refresh Toggle */}
+              <button
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  autoRefresh
+                    ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+                title="Pembaruan data otomatis setiap 10 detik"
+              >
+                <span className={`w-2 h-2 rounded-full ${autoRefresh ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`} />
+                <span>Auto: {autoRefresh ? "ON" : "OFF"}</span>
+              </button>
+
+              {/* Manual Refresh */}
+              <button
+                onClick={() => fetchServers()}
+                disabled={isRefreshing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                title="Segarkan data sekarang"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                <span>{isRefreshing ? "..." : "Segarkan"}</span>
+              </button>
             </div>
           </div>
         </div>

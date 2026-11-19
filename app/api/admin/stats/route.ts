@@ -1,7 +1,7 @@
 import { NextResponse, connection } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCachedData, getNoCacheHeaders, invalidateCacheKey } from "@/lib/server-cache";
-import { getAllOrdersAcrossAllServers } from "@/lib/mongodb";
+import { getAllOrdersAcrossAllServers, getOrdersDailyTrend } from "@/lib/mongodb";
 import { getAllTicketsAdmin } from "@/lib/ticket-db";
 
 export async function GET(request: Request) {
@@ -20,6 +20,10 @@ export async function GET(request: Request) {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+
         // 1. Parallel fetch from PostgreSQL, MongoDB multi-cluster, and Ticket store
         const [
           usersCount,
@@ -35,6 +39,11 @@ export async function GET(request: Request) {
           ticketsRes,
           depositAgg,
           pendingDepositsCount,
+          ordersTrendRes,
+          recentDeposits,
+          recentMerchantTxs,
+          merchantPaidAgg,
+          merchantTodayAgg,
         ] = await Promise.all([
           prisma.user.count(),
           prisma.user.count({ where: { create_at: { gte: todayStart } } }),
@@ -115,6 +124,33 @@ export async function GET(request: Request) {
               where: { payment_status: "pending" },
             })
             .catch(() => 0),
+          getOrdersDailyTrend(7).catch(() => ({})),
+          prisma.cryptomusTransaction
+            .findMany({
+              where: { create_at: { gte: sevenDaysAgo } },
+              select: { amount: true, payment_status: true, create_at: true },
+            })
+            .catch(() => []),
+          prisma.merchantTransaction
+            .findMany({
+              where: { createdAt: { gte: sevenDaysAgo } },
+              select: { amountUsd: true, paymentStatus: true, createdAt: true },
+            })
+            .catch(() => []),
+          prisma.merchantTransaction
+            .aggregate({
+              _sum: { amountUsd: true },
+              _count: { id: true },
+              where: { paymentStatus: "PAID" },
+            })
+            .catch(() => ({ _sum: { amountUsd: null }, _count: { id: 0 } })),
+          prisma.merchantTransaction
+            .aggregate({
+              _sum: { amountUsd: true },
+              _count: { id: true },
+              where: { paymentStatus: "PAID", createdAt: { gte: todayStart } },
+            })
+            .catch(() => ({ _sum: { amountUsd: null }, _count: { id: 0 } })),
         ]);
 
         // Process Provider balances & status
@@ -329,6 +365,56 @@ export async function GET(request: Request) {
               ? "warning"
               : "operational";
 
+        // Build 7-day realtime time series data for Orders, Deposits, and Merchant Transactions
+        const orderTrendMap = (ordersTrendRes || {}) as Record<string, { count: number; totalVolume: number }>;
+        const chartDays: Array<{
+          date: string;
+          label: string;
+          dayName: string;
+          ordersCount: number;
+          ordersVolume: number;
+          depositsCount: number;
+          depositsVolume: number;
+          merchantCount: number;
+          merchantVolume: number;
+        }> = [];
+
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const dateStr = d.toISOString().slice(0, 10);
+          const dayName = d.toLocaleDateString("id-ID", { weekday: "short" });
+          const label = i === 0 ? "Hari ini" : d.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+
+          const orderData = orderTrendMap[dateStr] || { count: 0, totalVolume: 0 };
+
+          const dayDeposits = (recentDeposits || []).filter((dep: any) => {
+            const depDate = new Date(dep.create_at).toISOString().slice(0, 10);
+            return depDate === dateStr && (dep.payment_status === "paid" || dep.payment_status === "paid_over");
+          });
+          const depositsCount = dayDeposits.length;
+          const depositsVolume = dayDeposits.reduce((acc: number, cur: any) => acc + Number(cur.amount || 0), 0);
+
+          const dayMerchant = (recentMerchantTxs || []).filter((m: any) => {
+            const mDate = new Date(m.createdAt).toISOString().slice(0, 10);
+            return mDate === dateStr && (m.paymentStatus === "PAID" || m.paymentStatus === "paid");
+          });
+          const merchantCount = dayMerchant.length;
+          const merchantVolume = dayMerchant.reduce((acc: number, cur: any) => acc + Number(cur.amountUsd || 0), 0);
+
+          chartDays.push({
+            date: dateStr,
+            label,
+            dayName,
+            ordersCount: orderData.count,
+            ordersVolume: Number(orderData.totalVolume.toFixed(2)),
+            depositsCount,
+            depositsVolume: Number(depositsVolume.toFixed(2)),
+            merchantCount,
+            merchantVolume: Number(merchantVolume.toFixed(2)),
+          });
+        }
+
         return {
           // Orders & Revenue
           totalOrders: grandTotalOrders,
@@ -365,6 +451,17 @@ export async function GET(request: Request) {
           totalDepositsPaid: Number(depositAgg._sum?.amount || 0),
           totalDepositsCount: depositAgg._count?.id || 0,
           pendingDepositsCount,
+
+          // Merchant Summary
+          merchantSummary: {
+            totalPaidVolume: Number(merchantPaidAgg?._sum?.amountUsd || 0),
+            totalPaidCount: merchantPaidAgg?._count?.id || 0,
+            todayPaidVolume: Number(merchantTodayAgg?._sum?.amountUsd || 0),
+            todayPaidCount: merchantTodayAgg?._count?.id || 0,
+          },
+
+          // Realtime 7-day Multi-Transaction Chart Data
+          chartData: chartDays,
 
           // Tickets
           openTicketsCount: openTickets.length,

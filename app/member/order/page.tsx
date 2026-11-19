@@ -10,6 +10,7 @@ import {
   Loader2,
   Info,
 } from "lucide-react";
+import { useMemberRealtime } from "@/app/member/components/member-realtime-provider";
 
 interface ServiceItem {
   id: number;
@@ -40,12 +41,20 @@ interface CategoryWithServices {
 }
 
 export default function MemberOrderPage() {
+  const { balance: realtimeBalance } = useMemberRealtime();
   const [categories, setCategories] = useState<CategoryWithServices[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
 
   // User State
-  const [userBalance, setUserBalance] = useState<number>(0);
+  const [userBalance, setUserBalance] = useState<number>(realtimeBalance || 0);
   const [serverArea, setServerArea] = useState<string>("SG");
+
+  // Keep balance in sync with realtime updates
+  useEffect(() => {
+    if (typeof realtimeBalance === "number") {
+      setUserBalance(realtimeBalance);
+    }
+  }, [realtimeBalance]);
 
   // Form State
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "">("");

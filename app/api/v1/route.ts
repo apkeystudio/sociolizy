@@ -354,24 +354,36 @@ export async function POST(request: Request) {
         // Realtime Pusher notification dispatch
         try {
           const { pusherServer } = await import("@/lib/pusher");
+          const orderPayload = {
+            id: newOrder.id,
+            invoice: newOrder.invoice,
+            order_id: newOrder.order_id,
+            username: user.username,
+            service_name: service.service_name,
+            service: service.service_name,
+            service_id: service.service_id,
+            target: target.trim(),
+            amount: orderQuantity,
+            price_sale: priceSale,
+            total: priceSale,
+            status: orderStatus,
+            server_area: userRegion,
+            create_at: newOrder.create_at,
+            time: new Date().toLocaleTimeString("id-ID"),
+          };
+
           pusherServer
-            .trigger("admin-notifications", "new-order", {
-              invoice,
-              username: user.username,
-              service: service.service_name,
-              amount: orderQuantity,
-              total: priceSale,
-              time: new Date().toLocaleTimeString("id-ID"),
-            })
+            .trigger("admin-notifications", "order-created", orderPayload)
             .catch(() => {});
 
           pusherServer
-            .trigger("admin-orders", "order-created", {
-              id: newOrder.id,
-              invoice,
-              username: user.username,
-              service_id: service.service_id,
-              status: orderStatus,
+            .trigger("admin-orders", "new-order", orderPayload)
+            .catch(() => {});
+
+          pusherServer
+            .trigger(`member-${user.uuid}`, "order-created", {
+              ...orderPayload,
+              balance: Number(currentBalance - priceSale),
             })
             .catch(() => {});
 

@@ -31,6 +31,7 @@ const FLASH_STORAGE_KEY = "master_smm_admin_flash_toast";
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const recentToastsRef = React.useRef<Map<string, number>>(new Map());
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -38,10 +39,33 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const showToast = useCallback(
     (title: string, message?: string, type: ToastType = "info", duration = 4000) => {
-      const id = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      // Deduplicate identical toasts fired within 2000ms
+      const cleanTitle = (title || "").trim().toLowerCase();
+      const cleanMsg = (message || "").trim().toLowerCase();
+      const dedupeKey = `${type}:${cleanTitle}:${cleanMsg.slice(0, 50)}`;
+      const now = Date.now();
+
+      const lastTimestamp = recentToastsRef.current.get(dedupeKey);
+      if (lastTimestamp && now - lastTimestamp < 2000) {
+        return;
+      }
+      recentToastsRef.current.set(dedupeKey, now);
+
+      // Prevent memory growth
+      if (recentToastsRef.current.size > 100) {
+        recentToastsRef.current.clear();
+      }
+
+      const id = `${now}-${Math.random().toString(36).substring(2, 7)}`;
       const newToast: ToastItem = { id, title, message, type, duration };
 
-      setToasts((prev) => [...prev, newToast]);
+      setToasts((prev) => {
+        // Prevent duplicate if already in visible stack
+        if (prev.some((t) => t.title === title && t.message === message)) {
+          return prev;
+        }
+        return [...prev, newToast];
+      });
 
       if (duration > 0) {
         setTimeout(() => {
